@@ -1,0 +1,5 @@
+module sh.sysl.qcbor
+@link("m")
+
+// Placeholder while the vendored C is proved to build. Replaced by the binding.
+private probe() -> int = 0

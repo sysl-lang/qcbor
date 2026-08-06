@@ -1,0 +1,35 @@
+// CBOR (RFC 8949), bound to QCBOR.
+//
+// There is no `dependencies` block because dependency resolution is designed and not yet built
+// (packages.md sections 3 to 6); this package is consumed today with `build-lib` and `--lib`, the way
+// any sysl library is.
+
+// `name` is the package; the module a program imports is `sh.sysl.qcbor`, and the two are
+// deliberately different. The module carries the `sh.sysl.` prefix so that no package claims a
+// top-level word another one might want; the package name is the short one, because it names this
+// repository rather than a namespace.
+
+package {
+  name    = "qcbor"
+  version = "0.1.0"
+}
+
+// **There is deliberately no `requires` block.** QCBOR allocates nothing -- `malloc`, `calloc` and
+// `free` appear nowhere in the vendored sources, which was checked rather than taken from the README
+// -- opens no file, reads no clock, and asks the operating system for nothing. Every context is
+// storage the caller already has, and every output is written into a buffer the caller supplied. So
+// there is no capability to name, exactly as with monocypher.
+//
+// **What it does need is the mathematics, and that is a `@link` rather than a capability.** The
+// decoder's numeric coercions -- the `..._convert_all` family, which turn a decimal fraction or a big
+// float into an `int` or a `f64` -- call `pow`, `exp2`, `feclearexcept` and `fetestexcept`. Nothing
+// else in QCBOR reaches for a library function beyond `memcpy`, `memmove`, `memcmp` and `strlen`.
+// `qcbor.sysl` names `m` in its header and the driver decides what that becomes for the target
+// (`15 §8`): a `-lm` where the mathematics is a file of its own, nothing on Darwin where it is inside
+// `libSystem`, and nothing on a freestanding target that has no libc to hold it.
+//
+// **So a freestanding build of this package links only if the program never reaches those coercions**
+// -- which is a real and useful position to be in, since encoding and ordinary decoding do not. The
+// section flags `build-lib` compiles with (`-ffunction-sections -fdata-sections`) are what make that
+// true in practice: a program that does not call `int_convert_all` does not drag `pow` in behind it.
+// Stating a capability here would have refused the whole package on a target where most of it works.
