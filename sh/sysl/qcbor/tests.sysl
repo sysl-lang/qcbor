@@ -918,7 +918,11 @@ private why(r: Result[long, Error]) -> ErrorKind =
         Ok(_) -> Success
 
 // {"a": 1, "b": "IETF", "c": true}
-private sample() -> []u8 = unhex("a361610161626449455446616363f5")
+// a3          map of three
+//   6161 01     "a": 1
+//   6162 6449455446   "b": "IETF"
+//   6163 f5     "c": true
+private sample() -> []u8 = unhex("a3616101616264494554466163f5")
 
 @test
 reads_a_map_by_label() =

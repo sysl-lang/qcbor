@@ -967,105 +967,105 @@ struct Decoder
 
     // -- Integers ----------------------------------------------------------------------------------
 
-    get_int(self) -> Result[long, Error] = self.int_by(lk_none, 0, null)
-    get_int_in_map(self, label: string) -> Result[long, Error] = self.int_by(lk_text, 0, sz(label))
-    get_int_in_map_at(self, label: long) -> Result[long, Error] = self.int_by(lk_int, label, null)
+    get_int(self) -> Result[long, Error] = self.int_by(lk_none, 0, no_label())
+    get_int_in_map(self, label: string) -> Result[long, Error] = self.int_by(lk_text, 0, label.bytes)
+    get_int_in_map_at(self, label: long) -> Result[long, Error] = self.int_by(lk_int, label, no_label())
 
-    private int_by(self, lk: int, ln: long, s: *u8) -> Result[long, Error]
+    private int_by(self, lk: int, ln: long, lb: []const u8) -> Result[long, Error]
         var v: long = 0
 
-        result(c_get_int64(self.handle, lk, ln, s, &v), v)
+        result(c_get_int64(self.handle, lk, ln, first(lb), lb.len, &v), v)
     end int_by
 
-    get_uint(self) -> Result[ulong, Error] = self.uint_by(lk_none, 0, null)
-    get_uint_in_map(self, label: string) -> Result[ulong, Error] = self.uint_by(lk_text, 0, sz(label))
-    get_uint_in_map_at(self, label: long) -> Result[ulong, Error] = self.uint_by(lk_int, label, null)
+    get_uint(self) -> Result[ulong, Error] = self.uint_by(lk_none, 0, no_label())
+    get_uint_in_map(self, label: string) -> Result[ulong, Error] = self.uint_by(lk_text, 0, label.bytes)
+    get_uint_in_map_at(self, label: long) -> Result[ulong, Error] = self.uint_by(lk_int, label, no_label())
 
-    private uint_by(self, lk: int, ln: long, s: *u8) -> Result[ulong, Error]
+    private uint_by(self, lk: int, ln: long, lb: []const u8) -> Result[ulong, Error]
         var v: ulong = 0u64
 
-        result(c_get_uint64(self.handle, lk, ln, s, &v), v)
+        result(c_get_uint64(self.handle, lk, ln, first(lb), lb.len, &v), v)
     end uint_by
 
     // -- Floating point ----------------------------------------------------------------------------
 
-    get_double(self) -> Result[real, Error] = self.double_by(lk_none, 0, null)
+    get_double(self) -> Result[real, Error] = self.double_by(lk_none, 0, no_label())
     get_double_in_map(self, label: string) -> Result[real, Error] =
-        self.double_by(lk_text, 0, sz(label))
+        self.double_by(lk_text, 0, label.bytes)
     get_double_in_map_at(self, label: long) -> Result[real, Error] =
-        self.double_by(lk_int, label, null)
+        self.double_by(lk_int, label, no_label())
 
-    private double_by(self, lk: int, ln: long, s: *u8) -> Result[real, Error]
+    private double_by(self, lk: int, ln: long, lb: []const u8) -> Result[real, Error]
         var v: real = 0.0
 
-        result(c_get_double(self.handle, lk, ln, s, &v), v)
+        result(c_get_double(self.handle, lk, ln, first(lb), lb.len, &v), v)
     end double_by
 
     // -- Simple values -----------------------------------------------------------------------------
 
-    get_bool(self) -> Result[bool, Error] = self.bool_by(lk_none, 0, null)
-    get_bool_in_map(self, label: string) -> Result[bool, Error] = self.bool_by(lk_text, 0, sz(label))
-    get_bool_in_map_at(self, label: long) -> Result[bool, Error] = self.bool_by(lk_int, label, null)
+    get_bool(self) -> Result[bool, Error] = self.bool_by(lk_none, 0, no_label())
+    get_bool_in_map(self, label: string) -> Result[bool, Error] = self.bool_by(lk_text, 0, label.bytes)
+    get_bool_in_map_at(self, label: long) -> Result[bool, Error] = self.bool_by(lk_int, label, no_label())
 
-    private bool_by(self, lk: int, ln: long, s: *u8) -> Result[bool, Error]
+    private bool_by(self, lk: int, ln: long, lb: []const u8) -> Result[bool, Error]
         var v: int = 0
 
-        result(c_get_bool(self.handle, lk, ln, s, &v), v != 0)
+        result(c_get_bool(self.handle, lk, ln, first(lb), lb.len, &v), v != 0)
     end bool_by
 
-    get_simple(self) -> Result[u8, Error] = self.simple_by(lk_none, 0, null)
-    get_simple_in_map(self, label: string) -> Result[u8, Error] = self.simple_by(lk_text, 0, sz(label))
-    get_simple_in_map_at(self, label: long) -> Result[u8, Error] = self.simple_by(lk_int, label, null)
+    get_simple(self) -> Result[u8, Error] = self.simple_by(lk_none, 0, no_label())
+    get_simple_in_map(self, label: string) -> Result[u8, Error] = self.simple_by(lk_text, 0, label.bytes)
+    get_simple_in_map_at(self, label: long) -> Result[u8, Error] = self.simple_by(lk_int, label, no_label())
 
-    private simple_by(self, lk: int, ln: long, s: *u8) -> Result[u8, Error]
+    private simple_by(self, lk: int, ln: long, lb: []const u8) -> Result[u8, Error]
         var v: u8 = 0u8
 
-        result(c_get_simple(self.handle, lk, ln, s, &v), v)
+        result(c_get_simple(self.handle, lk, ln, first(lb), lb.len, &v), v)
     end simple_by
 
     // These two carry no value: what is being asked is "is the next item this, and step over it".
-    get_null(self) -> Result[unit, Error] = unit_result(c_get_null(self.handle, lk_none, 0, null))
+    get_null(self) -> Result[unit, Error] = unit_result(c_get_null(self.handle, lk_none, 0, null, 0))
     get_null_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_get_null(self.handle, lk_text, 0, sz(label)))
+        unit_result(c_get_null(self.handle, lk_text, 0, first(label.bytes), label.bytes.len))
     get_null_in_map_at(self, label: long) -> Result[unit, Error] =
-        unit_result(c_get_null(self.handle, lk_int, label, null))
+        unit_result(c_get_null(self.handle, lk_int, label, null, 0))
 
     get_undefined(self) -> Result[unit, Error] =
-        unit_result(c_get_undefined(self.handle, lk_none, 0, null))
+        unit_result(c_get_undefined(self.handle, lk_none, 0, null, 0))
     get_undefined_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_get_undefined(self.handle, lk_text, 0, sz(label)))
+        unit_result(c_get_undefined(self.handle, lk_text, 0, first(label.bytes), label.bytes.len))
     get_undefined_in_map_at(self, label: long) -> Result[unit, Error] =
-        unit_result(c_get_undefined(self.handle, lk_int, label, null))
+        unit_result(c_get_undefined(self.handle, lk_int, label, null, 0))
 
     // -- Strings -----------------------------------------------------------------------------------
     //
     // As everywhere else, the bytes are a view into the input and `text` is what copies.
 
-    get_bytes(self) -> Result[[]const u8, Error] = self.bytes_by(lk_none, 0, null)
+    get_bytes(self) -> Result[[]const u8, Error] = self.bytes_by(lk_none, 0, no_label())
     get_bytes_in_map(self, label: string) -> Result[[]const u8, Error] =
-        self.bytes_by(lk_text, 0, sz(label))
+        self.bytes_by(lk_text, 0, label.bytes)
     get_bytes_in_map_at(self, label: long) -> Result[[]const u8, Error] =
-        self.bytes_by(lk_int, label, null)
+        self.bytes_by(lk_int, label, no_label())
 
-    private bytes_by(self, lk: int, ln: long, s: *u8) -> Result[[]const u8, Error]
+    private bytes_by(self, lk: int, ln: long, lb: []const u8) -> Result[[]const u8, Error]
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_get_bytes(self.handle, lk, ln, s, &p, &n), p, n)
+        str_result(c_get_bytes(self.handle, lk, ln, first(lb), lb.len, &p, &n), p, n)
     end bytes_by
 
     // The bytes of a text string. Still a view -- `text_of` turns one into a `string`.
-    get_text_bytes(self) -> Result[[]const u8, Error] = self.text_by(lk_none, 0, null)
+    get_text_bytes(self) -> Result[[]const u8, Error] = self.text_by(lk_none, 0, no_label())
     get_text_bytes_in_map(self, label: string) -> Result[[]const u8, Error] =
-        self.text_by(lk_text, 0, sz(label))
+        self.text_by(lk_text, 0, label.bytes)
     get_text_bytes_in_map_at(self, label: long) -> Result[[]const u8, Error] =
-        self.text_by(lk_int, label, null)
+        self.text_by(lk_int, label, no_label())
 
-    private text_by(self, lk: int, ln: long, s: *u8) -> Result[[]const u8, Error]
+    private text_by(self, lk: int, ln: long, lb: []const u8) -> Result[[]const u8, Error]
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_get_text(self.handle, lk, ln, s, &p, &n), p, n)
+        str_result(c_get_text(self.handle, lk, ln, first(lb), lb.len, &p, &n), p, n)
     end text_by
 
     // -- Converting getters ------------------------------------------------------------------------
@@ -1080,79 +1080,79 @@ struct Decoder
     // which is the whole reason this module names the mathematics in its `@link`.
 
     get_int_convert(self, conversions: u32) -> Result[long, Error] =
-        self.int_conv(lk_none, 0, null, conversions, false)
+        self.int_conv(lk_none, 0, no_label(), conversions, false)
     get_int_convert_in_map(self, label: string, conversions: u32) -> Result[long, Error] =
-        self.int_conv(lk_text, 0, sz(label), conversions, false)
+        self.int_conv(lk_text, 0, label.bytes, conversions, false)
     get_int_convert_in_map_at(self, label: long, conversions: u32) -> Result[long, Error] =
-        self.int_conv(lk_int, label, null, conversions, false)
+        self.int_conv(lk_int, label, no_label(), conversions, false)
 
     get_int_convert_all(self, conversions: u32) -> Result[long, Error] =
-        self.int_conv(lk_none, 0, null, conversions, true)
+        self.int_conv(lk_none, 0, no_label(), conversions, true)
     get_int_convert_all_in_map(self, label: string, conversions: u32) -> Result[long, Error] =
-        self.int_conv(lk_text, 0, sz(label), conversions, true)
+        self.int_conv(lk_text, 0, label.bytes, conversions, true)
     get_int_convert_all_in_map_at(self, label: long, conversions: u32) -> Result[long, Error] =
-        self.int_conv(lk_int, label, null, conversions, true)
+        self.int_conv(lk_int, label, no_label(), conversions, true)
 
-    private int_conv(self, lk: int, ln: long, s: *u8, types: u32, all: bool) -> Result[long, Error]
+    private int_conv(self, lk: int, ln: long, lb: []const u8, types: u32, all: bool) -> Result[long, Error]
         var v: long = 0
         var err: int = 0
 
         if all then
-            err = c_get_int64_convert_all(self.handle, lk, ln, s, types, &v)
+            err = c_get_int64_convert_all(self.handle, lk, ln, first(lb), lb.len, types, &v)
         else
-            err = c_get_int64_convert(self.handle, lk, ln, s, types, &v)
+            err = c_get_int64_convert(self.handle, lk, ln, first(lb), lb.len, types, &v)
 
         result(err, v)
     end int_conv
 
     get_uint_convert(self, conversions: u32) -> Result[ulong, Error] =
-        self.uint_conv(lk_none, 0, null, conversions, false)
+        self.uint_conv(lk_none, 0, no_label(), conversions, false)
     get_uint_convert_in_map(self, label: string, conversions: u32) -> Result[ulong, Error] =
-        self.uint_conv(lk_text, 0, sz(label), conversions, false)
+        self.uint_conv(lk_text, 0, label.bytes, conversions, false)
     get_uint_convert_in_map_at(self, label: long, conversions: u32) -> Result[ulong, Error] =
-        self.uint_conv(lk_int, label, null, conversions, false)
+        self.uint_conv(lk_int, label, no_label(), conversions, false)
 
     get_uint_convert_all(self, conversions: u32) -> Result[ulong, Error] =
-        self.uint_conv(lk_none, 0, null, conversions, true)
+        self.uint_conv(lk_none, 0, no_label(), conversions, true)
     get_uint_convert_all_in_map(self, label: string, conversions: u32) -> Result[ulong, Error] =
-        self.uint_conv(lk_text, 0, sz(label), conversions, true)
+        self.uint_conv(lk_text, 0, label.bytes, conversions, true)
     get_uint_convert_all_in_map_at(self, label: long, conversions: u32) -> Result[ulong, Error] =
-        self.uint_conv(lk_int, label, null, conversions, true)
+        self.uint_conv(lk_int, label, no_label(), conversions, true)
 
-    private uint_conv(self, lk: int, ln: long, s: *u8, types: u32, all: bool) -> Result[ulong, Error]
+    private uint_conv(self, lk: int, ln: long, lb: []const u8, types: u32, all: bool) -> Result[ulong, Error]
         var v: ulong = 0u64
         var err: int = 0
 
         if all then
-            err = c_get_uint64_convert_all(self.handle, lk, ln, s, types, &v)
+            err = c_get_uint64_convert_all(self.handle, lk, ln, first(lb), lb.len, types, &v)
         else
-            err = c_get_uint64_convert(self.handle, lk, ln, s, types, &v)
+            err = c_get_uint64_convert(self.handle, lk, ln, first(lb), lb.len, types, &v)
 
         result(err, v)
     end uint_conv
 
     get_double_convert(self, conversions: u32) -> Result[real, Error] =
-        self.double_conv(lk_none, 0, null, conversions, false)
+        self.double_conv(lk_none, 0, no_label(), conversions, false)
     get_double_convert_in_map(self, label: string, conversions: u32) -> Result[real, Error] =
-        self.double_conv(lk_text, 0, sz(label), conversions, false)
+        self.double_conv(lk_text, 0, label.bytes, conversions, false)
     get_double_convert_in_map_at(self, label: long, conversions: u32) -> Result[real, Error] =
-        self.double_conv(lk_int, label, null, conversions, false)
+        self.double_conv(lk_int, label, no_label(), conversions, false)
 
     get_double_convert_all(self, conversions: u32) -> Result[real, Error] =
-        self.double_conv(lk_none, 0, null, conversions, true)
+        self.double_conv(lk_none, 0, no_label(), conversions, true)
     get_double_convert_all_in_map(self, label: string, conversions: u32) -> Result[real, Error] =
-        self.double_conv(lk_text, 0, sz(label), conversions, true)
+        self.double_conv(lk_text, 0, label.bytes, conversions, true)
     get_double_convert_all_in_map_at(self, label: long, conversions: u32) -> Result[real, Error] =
-        self.double_conv(lk_int, label, null, conversions, true)
+        self.double_conv(lk_int, label, no_label(), conversions, true)
 
-    private double_conv(self, lk: int, ln: long, s: *u8, types: u32, all: bool) -> Result[real, Error]
+    private double_conv(self, lk: int, ln: long, lb: []const u8, types: u32, all: bool) -> Result[real, Error]
         var v: real = 0.0
         var err: int = 0
 
         if all then
-            err = c_get_double_convert_all(self.handle, lk, ln, s, types, &v)
+            err = c_get_double_convert_all(self.handle, lk, ln, first(lb), lb.len, types, &v)
         else
-            err = c_get_double_convert(self.handle, lk, ln, s, types, &v)
+            err = c_get_double_convert(self.handle, lk, ln, first(lb), lb.len, types, &v)
 
         result(err, v)
     end double_conv
@@ -1164,110 +1164,110 @@ struct Decoder
     // is, and `Optional` accepts either.
 
     get_epoch_date(self, tags: TagRequirement) -> Result[long, Error] =
-        self.epoch(lk_none, 0, null, tags, true)
+        self.epoch(lk_none, 0, no_label(), tags, true)
     get_epoch_date_in_map(self, label: string, tags: TagRequirement) -> Result[long, Error] =
-        self.epoch(lk_text, 0, sz(label), tags, true)
+        self.epoch(lk_text, 0, label.bytes, tags, true)
     get_epoch_date_in_map_at(self, label: long, tags: TagRequirement) -> Result[long, Error] =
-        self.epoch(lk_int, label, null, tags, true)
+        self.epoch(lk_int, label, no_label(), tags, true)
 
     get_epoch_days(self, tags: TagRequirement) -> Result[long, Error] =
-        self.epoch(lk_none, 0, null, tags, false)
+        self.epoch(lk_none, 0, no_label(), tags, false)
     get_epoch_days_in_map(self, label: string, tags: TagRequirement) -> Result[long, Error] =
-        self.epoch(lk_text, 0, sz(label), tags, false)
+        self.epoch(lk_text, 0, label.bytes, tags, false)
     get_epoch_days_in_map_at(self, label: long, tags: TagRequirement) -> Result[long, Error] =
-        self.epoch(lk_int, label, null, tags, false)
+        self.epoch(lk_int, label, no_label(), tags, false)
 
-    private epoch(self, lk: int, ln: long, s: *u8, tags: TagRequirement,
+    private epoch(self, lk: int, ln: long, lb: []const u8, tags: TagRequirement,
                   seconds: bool) -> Result[long, Error]
         var v: long = 0
         val req = c_tag_requirement(int(tags))
         var err: int = 0
 
         if seconds then
-            err = c_get_epoch_date(self.handle, lk, ln, s, req, &v)
+            err = c_get_epoch_date(self.handle, lk, ln, first(lb), lb.len, req, &v)
         else
-            err = c_get_epoch_days(self.handle, lk, ln, s, req, &v)
+            err = c_get_epoch_days(self.handle, lk, ln, first(lb), lb.len, req, &v)
 
         result(err, v)
     end epoch
 
     get_date_string(self, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(0, lk_none, 0, null, tags)
+        self.tagged_str(0, lk_none, 0, no_label(), tags)
     get_date_string_in_map(self, label: string, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(0, lk_text, 0, sz(label), tags)
+        self.tagged_str(0, lk_text, 0, label.bytes, tags)
     get_date_string_in_map_at(self, label: long, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(0, lk_int, label, null, tags)
+        self.tagged_str(0, lk_int, label, no_label(), tags)
 
     get_days_string(self, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(1, lk_none, 0, null, tags)
+        self.tagged_str(1, lk_none, 0, no_label(), tags)
     get_days_string_in_map(self, label: string, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(1, lk_text, 0, sz(label), tags)
+        self.tagged_str(1, lk_text, 0, label.bytes, tags)
     get_days_string_in_map_at(self, label: long, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(1, lk_int, label, null, tags)
+        self.tagged_str(1, lk_int, label, no_label(), tags)
 
     get_uri(self, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(2, lk_none, 0, null, tags)
+        self.tagged_str(2, lk_none, 0, no_label(), tags)
     get_uri_in_map(self, label: string, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(2, lk_text, 0, sz(label), tags)
+        self.tagged_str(2, lk_text, 0, label.bytes, tags)
     get_uri_in_map_at(self, label: long, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(2, lk_int, label, null, tags)
+        self.tagged_str(2, lk_int, label, no_label(), tags)
 
     get_b64(self, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(3, lk_none, 0, null, tags)
+        self.tagged_str(3, lk_none, 0, no_label(), tags)
     get_b64_in_map(self, label: string, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(3, lk_text, 0, sz(label), tags)
+        self.tagged_str(3, lk_text, 0, label.bytes, tags)
     get_b64_in_map_at(self, label: long, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(3, lk_int, label, null, tags)
+        self.tagged_str(3, lk_int, label, no_label(), tags)
 
     get_b64url(self, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(4, lk_none, 0, null, tags)
+        self.tagged_str(4, lk_none, 0, no_label(), tags)
     get_b64url_in_map(self, label: string, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(4, lk_text, 0, sz(label), tags)
+        self.tagged_str(4, lk_text, 0, label.bytes, tags)
     get_b64url_in_map_at(self, label: long, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(4, lk_int, label, null, tags)
+        self.tagged_str(4, lk_int, label, no_label(), tags)
 
     get_regex(self, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(5, lk_none, 0, null, tags)
+        self.tagged_str(5, lk_none, 0, no_label(), tags)
     get_regex_in_map(self, label: string, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(5, lk_text, 0, sz(label), tags)
+        self.tagged_str(5, lk_text, 0, label.bytes, tags)
     get_regex_in_map_at(self, label: long, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(5, lk_int, label, null, tags)
+        self.tagged_str(5, lk_int, label, no_label(), tags)
 
     get_binary_uuid(self, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(6, lk_none, 0, null, tags)
+        self.tagged_str(6, lk_none, 0, no_label(), tags)
     get_binary_uuid_in_map(self, label: string, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(6, lk_text, 0, sz(label), tags)
+        self.tagged_str(6, lk_text, 0, label.bytes, tags)
     get_binary_uuid_in_map_at(self, label: long, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.tagged_str(6, lk_int, label, null, tags)
+        self.tagged_str(6, lk_int, label, no_label(), tags)
 
     // One dispatcher rather than seven near-identical bodies. `which` names the getter, and the seven
     // differ in nothing else -- they take the same arguments and answer the same shape.
-    private tagged_str(self, which: int, lk: int, ln: long, s: *u8,
+    private tagged_str(self, which: int, lk: int, ln: long, lb: []const u8,
                        tags: TagRequirement) -> Result[[]const u8, Error]
         var p: *u8 = null
         var n: usize = 0
 
         val req = c_tag_requirement(int(tags))
 
-        str_result(c_get_tagged_str(self.handle, which, lk, ln, s, req, &p, &n), p, n)
+        str_result(c_get_tagged_str(self.handle, which, lk, ln, first(lb), lb.len, req, &p, &n), p, n)
     end tagged_str
 
     // An arbitrary-precision integer. **The sign is which tag it carried, not part of the bytes**,
     // and a negative one's bytes encode -1 minus the value -- the same convention the encoder uses.
     get_bignum(self, tags: TagRequirement) -> Result[Bignum, Error] =
-        self.bignum_by(lk_none, 0, null, tags)
+        self.bignum_by(lk_none, 0, no_label(), tags)
     get_bignum_in_map(self, label: string, tags: TagRequirement) -> Result[Bignum, Error] =
-        self.bignum_by(lk_text, 0, sz(label), tags)
+        self.bignum_by(lk_text, 0, label.bytes, tags)
     get_bignum_in_map_at(self, label: long, tags: TagRequirement) -> Result[Bignum, Error] =
-        self.bignum_by(lk_int, label, null, tags)
+        self.bignum_by(lk_int, label, no_label(), tags)
 
-    private bignum_by(self, lk: int, ln: long, s: *u8,
+    private bignum_by(self, lk: int, ln: long, lb: []const u8,
                       tags: TagRequirement) -> Result[Bignum, Error]
         var p: *u8 = null
         var n: usize = 0
         var negative: int = 0
 
-        val err = c_get_bignum(self.handle, lk, ln, s, c_tag_requirement(int(tags)),
+        val err = c_get_bignum(self.handle, lk, ln, first(lb), lb.len, c_tag_requirement(int(tags)),
                                &p, &n, &negative)
 
         if err != 0 then
@@ -1281,18 +1281,18 @@ struct Decoder
     // A MIME message. `binary` says it arrived under tag 257 rather than 36, which a caller that will
     // read the body needs to know: one is text and the other is not.
     get_mime(self, tags: TagRequirement) -> Result[MimeMessage, Error] =
-        self.mime_by(lk_none, 0, null, tags)
+        self.mime_by(lk_none, 0, no_label(), tags)
     get_mime_in_map(self, label: string, tags: TagRequirement) -> Result[MimeMessage, Error] =
-        self.mime_by(lk_text, 0, sz(label), tags)
+        self.mime_by(lk_text, 0, label.bytes, tags)
     get_mime_in_map_at(self, label: long, tags: TagRequirement) -> Result[MimeMessage, Error] =
-        self.mime_by(lk_int, label, null, tags)
+        self.mime_by(lk_int, label, no_label(), tags)
 
-    private mime_by(self, lk: int, ln: long, s: *u8, tags: TagRequirement) -> Result[MimeMessage, Error]
+    private mime_by(self, lk: int, ln: long, lb: []const u8, tags: TagRequirement) -> Result[MimeMessage, Error]
         var p: *u8 = null
         var n: usize = 0
         var binary: int = 0
 
-        val err = c_get_mime(self.handle, lk, ln, s, c_tag_requirement(int(tags)), &p, &n, &binary)
+        val err = c_get_mime(self.handle, lk, ln, first(lb), lb.len, c_tag_requirement(int(tags)), &p, &n, &binary)
 
         if err != 0 then
             Err(Error(err))
@@ -1305,22 +1305,22 @@ struct Decoder
     // -- Decimal fractions and big floats ----------------------------------------------------------
 
     get_decimal_fraction(self, tags: TagRequirement) -> Result[ExpMantissa, Error] =
-        self.exp_mantissa(lk_none, 0, null, tags, true)
+        self.exp_mantissa(lk_none, 0, no_label(), tags, true)
     get_decimal_fraction_in_map(self, label: string,
                                 tags: TagRequirement) -> Result[ExpMantissa, Error] =
-        self.exp_mantissa(lk_text, 0, sz(label), tags, true)
+        self.exp_mantissa(lk_text, 0, label.bytes, tags, true)
     get_decimal_fraction_in_map_at(self, label: long,
                                    tags: TagRequirement) -> Result[ExpMantissa, Error] =
-        self.exp_mantissa(lk_int, label, null, tags, true)
+        self.exp_mantissa(lk_int, label, no_label(), tags, true)
 
     get_big_float(self, tags: TagRequirement) -> Result[ExpMantissa, Error] =
-        self.exp_mantissa(lk_none, 0, null, tags, false)
+        self.exp_mantissa(lk_none, 0, no_label(), tags, false)
     get_big_float_in_map(self, label: string, tags: TagRequirement) -> Result[ExpMantissa, Error] =
-        self.exp_mantissa(lk_text, 0, sz(label), tags, false)
+        self.exp_mantissa(lk_text, 0, label.bytes, tags, false)
     get_big_float_in_map_at(self, label: long, tags: TagRequirement) -> Result[ExpMantissa, Error] =
-        self.exp_mantissa(lk_int, label, null, tags, false)
+        self.exp_mantissa(lk_int, label, no_label(), tags, false)
 
-    private exp_mantissa(self, lk: int, ln: long, s: *u8, tags: TagRequirement,
+    private exp_mantissa(self, lk: int, ln: long, lb: []const u8, tags: TagRequirement,
                          decimal: bool) -> Result[ExpMantissa, Error]
         var mantissa: long = 0
         var exponent: long = 0
@@ -1329,9 +1329,9 @@ struct Decoder
         var err: int = 0
 
         if decimal then
-            err = c_get_decimal_fraction(self.handle, lk, ln, s, req, &mantissa, &exponent)
+            err = c_get_decimal_fraction(self.handle, lk, ln, first(lb), lb.len, req, &mantissa, &exponent)
         else
-            err = c_get_big_float(self.handle, lk, ln, s, req, &mantissa, &exponent)
+            err = c_get_big_float(self.handle, lk, ln, first(lb), lb.len, req, &mantissa, &exponent)
 
         if err == 0 then Ok(ExpMantissa(mantissa, exponent)) else Err(Error(err))
     end exp_mantissa
@@ -1345,24 +1345,24 @@ struct Decoder
     // outlive it.
     get_decimal_fraction_big(self, scratch: []u8,
                              tags: TagRequirement) -> Result[BigMantissa, Error] =
-        self.big_mantissa(lk_none, 0, null, scratch, tags, true)
+        self.big_mantissa(lk_none, 0, no_label(), scratch, tags, true)
     get_decimal_fraction_big_in_map(self, label: string, scratch: []u8,
                                     tags: TagRequirement) -> Result[BigMantissa, Error] =
-        self.big_mantissa(lk_text, 0, sz(label), scratch, tags, true)
+        self.big_mantissa(lk_text, 0, label.bytes, scratch, tags, true)
     get_decimal_fraction_big_in_map_at(self, label: long, scratch: []u8,
                                        tags: TagRequirement) -> Result[BigMantissa, Error] =
-        self.big_mantissa(lk_int, label, null, scratch, tags, true)
+        self.big_mantissa(lk_int, label, no_label(), scratch, tags, true)
 
     get_big_float_big(self, scratch: []u8, tags: TagRequirement) -> Result[BigMantissa, Error] =
-        self.big_mantissa(lk_none, 0, null, scratch, tags, false)
+        self.big_mantissa(lk_none, 0, no_label(), scratch, tags, false)
     get_big_float_big_in_map(self, label: string, scratch: []u8,
                              tags: TagRequirement) -> Result[BigMantissa, Error] =
-        self.big_mantissa(lk_text, 0, sz(label), scratch, tags, false)
+        self.big_mantissa(lk_text, 0, label.bytes, scratch, tags, false)
     get_big_float_big_in_map_at(self, label: long, scratch: []u8,
                                 tags: TagRequirement) -> Result[BigMantissa, Error] =
-        self.big_mantissa(lk_int, label, null, scratch, tags, false)
+        self.big_mantissa(lk_int, label, no_label(), scratch, tags, false)
 
-    private big_mantissa(self, lk: int, ln: long, s: *u8, scratch: []u8, tags: TagRequirement,
+    private big_mantissa(self, lk: int, ln: long, lb: []const u8, scratch: []u8, tags: TagRequirement,
                          decimal: bool) -> Result[BigMantissa, Error]
         var p: *u8 = null
         var n: usize = 0
@@ -1373,10 +1373,10 @@ struct Decoder
         var err: int = 0
 
         if decimal then
-            err = c_get_decimal_fraction_big(self.handle, lk, ln, s, req, first_mut(scratch),
+            err = c_get_decimal_fraction_big(self.handle, lk, ln, first(lb), lb.len, req, first_mut(scratch),
                                        scratch.len, &p, &n, &negative, &exponent)
         else
-            err = c_get_big_float_big(self.handle, lk, ln, s, req, first_mut(scratch),
+            err = c_get_big_float_big(self.handle, lk, ln, first(lb), lb.len, req, first_mut(scratch),
 
                                     scratch.len, &p, &n, &negative, &exponent)
 
@@ -1395,46 +1395,46 @@ struct Decoder
     // `enter` is matched by an `exit`, which puts the traversal on the item after the whole thing.
 
     enter_map(self) -> Result[unit, Error] =
-        unit_result(c_enter_map(self.handle, lk_none, 0, null))
+        unit_result(c_enter_map(self.handle, lk_none, 0, null, 0))
     enter_map_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_enter_map(self.handle, lk_text, 0, sz(label)))
+        unit_result(c_enter_map(self.handle, lk_text, 0, first(label.bytes), label.bytes.len))
     enter_map_in_map_at(self, label: long) -> Result[unit, Error] =
-        unit_result(c_enter_map(self.handle, lk_int, label, null))
+        unit_result(c_enter_map(self.handle, lk_int, label, null, 0))
 
     enter_array(self) -> Result[unit, Error] =
-        unit_result(c_enter_array(self.handle, lk_none, 0, null))
+        unit_result(c_enter_array(self.handle, lk_none, 0, null, 0))
     enter_array_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_enter_array(self.handle, lk_text, 0, sz(label)))
+        unit_result(c_enter_array(self.handle, lk_text, 0, first(label.bytes), label.bytes.len))
     enter_array_in_map_at(self, label: long) -> Result[unit, Error] =
-        unit_result(c_enter_array(self.handle, lk_int, label, null))
+        unit_result(c_enter_array(self.handle, lk_int, label, null, 0))
 
     exit_map(self) -> Result[unit, Error] = unit_result(c_exit_map(self.handle))
     exit_array(self) -> Result[unit, Error] = unit_result(c_exit_array(self.handle))
 
     // A whole map or array as **the bytes that encode it**, without decoding inside -- for forwarding
     // a subtree untouched, or hashing the exact bytes a signature covers.
-    get_map_bytes(self) -> Result[[]const u8, Error] = self.nested_bytes(lk_none, 0, null, true)
+    get_map_bytes(self) -> Result[[]const u8, Error] = self.nested_bytes(lk_none, 0, no_label(), true)
     get_map_bytes_in_map(self, label: string) -> Result[[]const u8, Error] =
-        self.nested_bytes(lk_text, 0, sz(label), true)
+        self.nested_bytes(lk_text, 0, label.bytes, true)
     get_map_bytes_in_map_at(self, label: long) -> Result[[]const u8, Error] =
-        self.nested_bytes(lk_int, label, null, true)
+        self.nested_bytes(lk_int, label, no_label(), true)
 
-    get_array_bytes(self) -> Result[[]const u8, Error] = self.nested_bytes(lk_none, 0, null, false)
+    get_array_bytes(self) -> Result[[]const u8, Error] = self.nested_bytes(lk_none, 0, no_label(), false)
     get_array_bytes_in_map(self, label: string) -> Result[[]const u8, Error] =
-        self.nested_bytes(lk_text, 0, sz(label), false)
+        self.nested_bytes(lk_text, 0, label.bytes, false)
     get_array_bytes_in_map_at(self, label: long) -> Result[[]const u8, Error] =
-        self.nested_bytes(lk_int, label, null, false)
+        self.nested_bytes(lk_int, label, no_label(), false)
 
-    private nested_bytes(self, lk: int, ln: long, s: *u8, map: bool) -> Result[[]const u8, Error]
+    private nested_bytes(self, lk: int, ln: long, lb: []const u8, map: bool) -> Result[[]const u8, Error]
         var p: *u8 = null
         var n: usize = 0
 
         var err: int = 0
 
         if map then
-            err = c_get_map_bytes(self.handle, lk, ln, s, &p, &n)
+            err = c_get_map_bytes(self.handle, lk, ln, first(lb), lb.len, &p, &n)
         else
-            err = c_get_array_bytes(self.handle, lk, ln, s, &p, &n)
+            err = c_get_array_bytes(self.handle, lk, ln, first(lb), lb.len, &p, &n)
 
         str_result(err, p, n)
     end nested_bytes
@@ -1442,20 +1442,20 @@ struct Decoder
     // A byte string whose content is itself CBOR, entered as if it were the input -- the decoding
     // half of the encoder's `bstr_wrap`, and how COSE reads a payload whose bytes were signed.
     enter_bstr_wrapped(self, tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.bstr_by(lk_none, 0, null, tags)
+        self.bstr_by(lk_none, 0, no_label(), tags)
     enter_bstr_wrapped_in_map(self, label: string,
                               tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.bstr_by(lk_text, 0, sz(label), tags)
+        self.bstr_by(lk_text, 0, label.bytes, tags)
     enter_bstr_wrapped_in_map_at(self, label: long,
                                  tags: TagRequirement) -> Result[[]const u8, Error] =
-        self.bstr_by(lk_int, label, null, tags)
+        self.bstr_by(lk_int, label, no_label(), tags)
 
-    private bstr_by(self, lk: int, ln: long, s: *u8,
+    private bstr_by(self, lk: int, ln: long, lb: []const u8,
                     tags: TagRequirement) -> Result[[]const u8, Error]
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_enter_bstr_wrapped(self.handle, lk, ln, s, c_tag_requirement(int(tags)),
+        str_result(c_enter_bstr_wrapped(self.handle, lk, ln, first(lb), lb.len, c_tag_requirement(int(tags)),
                                         &p, &n), p, n)
     end bstr_by
 
@@ -1464,13 +1464,13 @@ struct Decoder
     // One item by label with no type expected -- the general form the typed getters specialize. The
     // item lands where `Item` reads it, so the answer is an `Item` rather than a value.
     get_item_in_map(self, label: string) -> Result[Item, Error]
-        val err = c_get_item_in_map(self.handle, lk_text, 0, sz(label))
+        val err = c_get_item_in_map(self.handle, lk_text, 0, first(label.bytes), label.bytes.len)
 
         if err == 0 then Ok(Item(self)) else Err(Error(err))
     end get_item_in_map
 
     get_item_in_map_at(self, label: long) -> Result[Item, Error]
-        val err = c_get_item_in_map(self.handle, lk_int, label, null)
+        val err = c_get_item_in_map(self.handle, lk_int, label, null, 0)
 
         if err == 0 then Ok(Item(self)) else Err(Error(err))
     end get_item_in_map_at
@@ -1614,39 +1614,39 @@ extern "sysl_qcbor_item_stage" c_item_stage(d: *DecodeCtx, item: *u8)
 extern "sysl_qcbor_callback_ok" c_callback_ok() -> int
 extern "sysl_qcbor_callback_fail" c_callback_fail() -> int
 
-extern "sysl_qcbor_get_int64" c_get_int64(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_int64" c_get_int64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                           out: *long) -> int
-extern "sysl_qcbor_get_uint64" c_get_uint64(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_uint64" c_get_uint64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                             out: *ulong) -> int
-extern "sysl_qcbor_get_double" c_get_double(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_double" c_get_double(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                             out: *real) -> int
-extern "sysl_qcbor_get_simple" c_get_simple(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_simple" c_get_simple(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                             out: *u8) -> int
-extern "sysl_qcbor_get_bool" c_get_bool(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_bool" c_get_bool(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                         out: *int) -> int
-extern "sysl_qcbor_get_null" c_get_null(d: *DecodeCtx, lk: int, ln: long, sz: *u8) -> int
-extern "sysl_qcbor_get_undefined" c_get_undefined(d: *DecodeCtx, lk: int, ln: long, sz: *u8) -> int
-extern "sysl_qcbor_get_bytes" c_get_bytes(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_null" c_get_null(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
+extern "sysl_qcbor_get_undefined" c_get_undefined(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
+extern "sysl_qcbor_get_bytes" c_get_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                           p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_text" c_get_text(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_text" c_get_text(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                         p: **u8, n: *usize) -> int
 
 extern "sysl_qcbor_get_int64_convert" c_get_int64_convert(d: *DecodeCtx, lk: int, ln: long,
-                                                          sz: *u8, types: u32, out: *long) -> int
+                                                          lp: *u8, ll: usize, types: u32, out: *long) -> int
 extern "sysl_qcbor_get_int64_convert_all" c_get_int64_convert_all(d: *DecodeCtx, lk: int, ln: long,
-                                                                  sz: *u8, types: u32,
+                                                                  lp: *u8, ll: usize, types: u32,
                                                                   out: *long) -> int
 extern "sysl_qcbor_get_uint64_convert" c_get_uint64_convert(d: *DecodeCtx, lk: int, ln: long,
-                                                            sz: *u8, types: u32,
+                                                            lp: *u8, ll: usize, types: u32,
                                                             out: *ulong) -> int
 extern "sysl_qcbor_get_uint64_convert_all" c_get_uint64_convert_all(d: *DecodeCtx, lk: int,
-                                                                    ln: long, sz: *u8, types: u32,
+                                                                    ln: long, lp: *u8, ll: usize, types: u32,
                                                                     out: *ulong) -> int
 extern "sysl_qcbor_get_double_convert" c_get_double_convert(d: *DecodeCtx, lk: int, ln: long,
-                                                            sz: *u8, types: u32,
+                                                            lp: *u8, ll: usize, types: u32,
                                                             out: *real) -> int
 extern "sysl_qcbor_get_double_convert_all" c_get_double_convert_all(d: *DecodeCtx, lk: int,
-                                                                    ln: long, sz: *u8, types: u32,
+                                                                    ln: long, lp: *u8, ll: usize, types: u32,
                                                                     out: *real) -> int
 
 extern "sysl_qcbor_convert_xint64" c_convert_xint64() -> u32
@@ -1656,60 +1656,60 @@ extern "sysl_qcbor_convert_decimal_fraction" c_convert_decimal_fraction() -> u32
 extern "sysl_qcbor_convert_bigfloat" c_convert_bigfloat() -> u32
 extern "sysl_qcbor_tag_requirement" c_tag_requirement(ordinal: int) -> u8
 
-extern "sysl_qcbor_get_epoch_date" c_get_epoch_date(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_epoch_date" c_get_epoch_date(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                     req: u8, out: *long) -> int
-extern "sysl_qcbor_get_epoch_days" c_get_epoch_days(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_epoch_days" c_get_epoch_days(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                     req: u8, out: *long) -> int
-extern "sysl_qcbor_get_date_string" c_get_date_string(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_date_string" c_get_date_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                       req: u8, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_days_string" c_get_days_string(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_days_string" c_get_days_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                       req: u8, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_uri" c_get_uri(d: *DecodeCtx, lk: int, ln: long, sz: *u8, req: u8,
+extern "sysl_qcbor_get_uri" c_get_uri(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                       p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_b64" c_get_b64(d: *DecodeCtx, lk: int, ln: long, sz: *u8, req: u8,
+extern "sysl_qcbor_get_b64" c_get_b64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                       p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_b64url" c_get_b64url(d: *DecodeCtx, lk: int, ln: long, sz: *u8, req: u8,
+extern "sysl_qcbor_get_b64url" c_get_b64url(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                             p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_regex" c_get_regex(d: *DecodeCtx, lk: int, ln: long, sz: *u8, req: u8,
+extern "sysl_qcbor_get_regex" c_get_regex(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                           p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_binary_uuid" c_get_binary_uuid(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_binary_uuid" c_get_binary_uuid(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                       req: u8, p: **u8, n: *usize) -> int
 // The seven above behind one entry point, chosen by `which`, so the sysl side has one dispatcher
 // rather than seven bodies that differ in a name.
 extern "sysl_qcbor_get_tagged_str" c_get_tagged_str(d: *DecodeCtx, which: int, lk: int, ln: long,
-                                                    sz: *u8, req: u8, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_bignum" c_get_bignum(d: *DecodeCtx, lk: int, ln: long, sz: *u8, req: u8,
+                                                    lp: *u8, ll: usize, req: u8, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_bignum" c_get_bignum(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                             p: **u8, n: *usize, negative: *int) -> int
-extern "sysl_qcbor_get_mime" c_get_mime(d: *DecodeCtx, lk: int, ln: long, sz: *u8, req: u8,
+extern "sysl_qcbor_get_mime" c_get_mime(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                         p: **u8, n: *usize, binary: *int) -> int
 
 extern "sysl_qcbor_get_decimal_fraction" c_get_decimal_fraction(d: *DecodeCtx, lk: int, ln: long,
-                                                                sz: *u8, req: u8, mantissa: *long,
+                                                                lp: *u8, ll: usize, req: u8, mantissa: *long,
                                                                 exponent: *long) -> int
-extern "sysl_qcbor_get_big_float" c_get_big_float(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_big_float" c_get_big_float(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                   req: u8, mantissa: *long,
                                                   exponent: *long) -> int
 extern "sysl_qcbor_get_decimal_fraction_big" c_get_decimal_fraction_big(
-    d: *DecodeCtx, lk: int, ln: long, sz: *u8, req: u8, scratch: *u8, scratch_len: usize,
+    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
     p: **u8, n: *usize, negative: *int, exponent: *long) -> int
 extern "sysl_qcbor_get_big_float_big" c_get_big_float_big(
-    d: *DecodeCtx, lk: int, ln: long, sz: *u8, req: u8, scratch: *u8, scratch_len: usize,
+    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
     p: **u8, n: *usize, negative: *int, exponent: *long) -> int
 
-extern "sysl_qcbor_enter_map" c_enter_map(d: *DecodeCtx, lk: int, ln: long, sz: *u8) -> int
-extern "sysl_qcbor_enter_array" c_enter_array(d: *DecodeCtx, lk: int, ln: long, sz: *u8) -> int
+extern "sysl_qcbor_enter_map" c_enter_map(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
+extern "sysl_qcbor_enter_array" c_enter_array(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
 extern "sysl_qcbor_exit_map" c_exit_map(d: *DecodeCtx) -> int
 extern "sysl_qcbor_exit_array" c_exit_array(d: *DecodeCtx) -> int
-extern "sysl_qcbor_get_map_bytes" c_get_map_bytes(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_map_bytes" c_get_map_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                   p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_array_bytes" c_get_array_bytes(d: *DecodeCtx, lk: int, ln: long, sz: *u8,
+extern "sysl_qcbor_get_array_bytes" c_get_array_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                       p: **u8, n: *usize) -> int
 extern "sysl_qcbor_enter_bstr_wrapped" c_enter_bstr_wrapped(d: *DecodeCtx, lk: int, ln: long,
-                                                            sz: *u8, req: u8, p: **u8,
+                                                            lp: *u8, ll: usize, req: u8, p: **u8,
                                                             n: *usize) -> int
 extern "sysl_qcbor_exit_bstr_wrapped" c_exit_bstr_wrapped(d: *DecodeCtx) -> int
 extern "sysl_qcbor_get_item_in_map" c_get_item_in_map(d: *DecodeCtx, lk: int, ln: long,
-                                                      sz: *u8) -> int
+                                                      lp: *u8, ll: usize) -> int
 
 // The label discriminators the shim switches on. Named rather than written as 0, 1 and 2 at ninety
 // call sites, which is where one of them would eventually be wrong.
@@ -1722,7 +1722,10 @@ private const lk_text: int = 2
 // **The copy lives as long as the call and no longer**, which is all QCBOR needs: the search reads
 // the label during the call and keeps nothing. The batch list is the exception and copies its labels
 // into storage of its own, because there the labels have to survive until the run.
-private sz(label: string) -> *u8 = cstring(label).ptr
+// The empty label, for the forms that take the next item rather than searching for one. Written as
+// a named function rather than as a bare `[]` at ninety call sites, which reads better and gives the
+// empty slice a type without an annotation.
+private no_label() -> []const u8 = []
 
 private result[T](err: int, value: T) -> Result[T, Error] =
     if err == 0 then Ok(value) else Err(Error(err))
