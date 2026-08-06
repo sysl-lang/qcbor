@@ -4,13 +4,17 @@ import sysl.text.str_builder_with_capacity
 
 // The binding's own tests, run by `sysl test .`.
 //
-// Every expected byte string below is from RFC 8949 itself -- appendix A is a table of CBOR
-// encodings, and the diagnostic notation beside each one says what it means -- so a test that passes
-// says the bytes crossed the boundary intact, and a binding that swapped two arguments or dropped a
-// length could not make one pass by coincidence.
+// **Almost every expected byte string below is from RFC 8949 appendix A**, which prints a table of
+// CBOR encodings beside the diagnostic notation for what each one means. So a test that passes says
+// the bytes crossed the boundary intact and came back as the specification says they should, and a
+// binding that swapped two arguments or dropped a length could not make one pass by coincidence.
+//
+// That is worth more here than a round-trip would be on its own: encoding and decoding through the
+// same wrong assumption round-trips perfectly.
 
 private nib(c: u8) -> u8 = if c >= 97 then c - 87 elif c >= 65 then c - 55 else c - 48
 
+// The inverse of `hex`, for writing a vector the way the specification prints it.
 private unhex(s: string) -> []u8
     require s.bytes.len % 2 == 0, "a hexadecimal byte string has an even number of digits"
 
@@ -34,21 +38,541 @@ private hex(bytes: []const u8) -> string
     b.finish()
 end hex
 
-@test
-encodes_a_small_map() =
-    var storage: []u64 = [0u64; encode_words()]
-    var out: []u8 = [0u8; 64]
+// Finish an encoder and render what it wrote, so a failure shows up as a string that will not match
+// rather than as a `Result` every assertion would have to unwrap.
+private done(e: Encoder, out: []u8) -> string
+    e.finish() match
+        Err(why) -> s"<error: ${why.message()}>"
+        Ok(n) -> hex(out[0..<n])
+end done
 
-    encoder(storage, out) match
+// Encode one item with `build` and render it. **The closure is the expression form on purpose**: an
+// indented block does not reach inside an argument list (`00 §9`), so a case needing several calls
+// binds its closure to a name first, and the structural tests below do exactly that.
+private check(expected: string, note: string, build: Encoder -> unit)
+    var out: []u8 = [0u8; 128]
+    var e = encoder(out)
+
+    build(e)
+    assert(done(e, out) == expected, note)
+end check
+
+// ==================================================================================================
+// The shape of the binding, as against what it encodes
+// ==================================================================================================
+
+// **The encoder must survive the function that made it.** A QCBOR context is storage the caller
+// supplies and the encoder holds a pointer into it, so an encoder whose storage was a local of a
+// function that has returned would write through a dangling pointer -- and would very likely still
+// pass a test that built and used it in one place. This builds it somewhere else on purpose.
+private make_one(out: []u8) -> Encoder
+    var e = encoder(out)
+
+    e.open_array()
+    e
+end make_one
+
+@test
+an_encoder_outlives_the_function_that_made_it() =
+    var out: []u8 = [0u8; 32]
+    var e = make_one(out)
+
+    e.add_int(1)
+    e.add_int(2)
+    e.close_array()
+
+    assert(done(e, out) == "820102", "[1, 2] survives its constructor")
+
+// The storage a caller supplies is the allocator-free path, and it must reach the same bytes.
+@test
+an_encoder_can_be_given_its_own_storage() =
+    var storage: []u64 = [0u64; encode_words()]
+    var out: []u8 = [0u8; 32]
+
+    encoder_with_storage(storage, out) match
         Err(why) -> assert(false, why)
         Ok(e) ->
-            e.open_map()
-            e.add_text("a")
             e.add_int(1)
-            e.close_map()
+            assert(done(e, out) == "01", "1")
 
-            e.finish() match
-                Err(code) -> assert(false, f"encoding failed with ${code}")
+// Storage shorter than the context needs is refused rather than written past.
+@test
+storage_that_is_too_small_is_refused() =
+    var storage: []u64 = [0u64; 1]
+    var out: []u8 = [0u8; 32]
 
-                // RFC 8949 appendix A: {"a": 1} is a1 61 61 01.
-                Ok(n) -> assert(hex(out[0..<n]) == "a1616101", "{\"a\": 1}")
+    encoder_with_storage(storage, out) match
+        Ok(_) -> assert(false, "one word is not enough for a context and should have been refused")
+        Err(_) -> assert(true, "refused")
+
+// ==================================================================================================
+// Encoding — RFC 8949 appendix A
+// ==================================================================================================
+
+@test
+encodes_the_unsigned_integers() =
+    check("00", "0", e -> e.add_int(0))
+    check("01", "1", e -> e.add_int(1))
+    check("0a", "10", e -> e.add_int(10))
+    check("17", "23", e -> e.add_int(23))
+    check("1818", "24", e -> e.add_int(24))
+    check("1819", "25", e -> e.add_int(25))
+    check("1864", "100", e -> e.add_int(100))
+    check("1903e8", "1000", e -> e.add_int(1000))
+    check("1a000f4240", "1000000", e -> e.add_int(1000000))
+    check("1b000000e8d4a51000", "1000000000000", e -> e.add_int(1000000000000))
+
+// The largest CBOR unsigned integer is 2^64 - 1, which does not fit a signed `long`. That is the
+// reason `add_uint` is a method of its own rather than `add_int` taking the wider type.
+@test
+encodes_the_largest_unsigned_integer() =
+    check("1bffffffffffffffff", "18446744073709551615", e -> e.add_uint(18446744073709551615u64))
+
+@test
+encodes_the_negative_integers() =
+    check("20", "-1", e -> e.add_int(-1))
+    check("29", "-10", e -> e.add_int(-10))
+    check("3863", "-100", e -> e.add_int(-100))
+    check("3903e7", "-1000", e -> e.add_int(-1000))
+
+@test
+encodes_the_simple_values() =
+    check("f4", "false", e -> e.add_bool(false))
+    check("f5", "true", e -> e.add_bool(true))
+    check("f6", "null", e -> e.add_null())
+    check("f7", "undefined", e -> e.add_undef())
+    check("f0", "simple(16)", e -> e.add_simple(16u8))
+    check("f8ff", "simple(255)", e -> e.add_simple(255u8))
+
+// **Preferred serialization is what makes these two bytes.** A double whose value fits a half
+// exactly is written as a half, which is RFC 8949's rule and what a protocol needing deterministic
+// bytes depends on.
+@test
+encodes_floats_in_their_shortest_exact_form() =
+    check("f90000", "0.0", e -> e.add_double(0.0))
+    check("f98000", "-0.0", e -> e.add_double(-0.0))
+    check("f93c00", "1.0", e -> e.add_double(1.0))
+    check("f93e00", "1.5", e -> e.add_double(1.5))
+    check("f97bff", "65504.0", e -> e.add_double(65504.0))
+    check("f9c400", "-4.0", e -> e.add_double(-4.0))
+    check("fb3ff199999999999a", "1.1", e -> e.add_double(1.1))
+    check("fbc010666666666666", "-4.1", e -> e.add_double(-4.1))
+    check("fa47c35000", "100000.0", e -> e.add_double(100000.0))
+    check("fb7e37e43c8800759c", "1.0e+300", e -> e.add_double(1.0e+300))
+
+// The smallest subnormal and the smallest normal half, which are the edges of the shortening rule.
+@test
+encodes_the_small_halves() =
+    check("f90001", "5.960464477539063e-8", e -> e.add_double(5.960464477539063e-8))
+    check("f90400", "0.00006103515625", e -> e.add_double(0.00006103515625))
+
+// Without preferred serialization the same value takes its full width, which is what a protocol that
+// fixes the encoding wants.
+@test
+encodes_floats_at_full_width_when_asked() =
+    check("fb3ff0000000000000", "1.0 as a double", e -> e.add_double_exact(1.0))
+    check("fa3f800000", "1.0 as a float", e -> e.add_float_exact(1.0f32))
+
+@test
+encodes_the_text_strings() =
+    check("60", "the empty string", e -> e.add_text(""))
+    check("6161", "a", e -> e.add_text("a"))
+    check("6449455446", "IETF", e -> e.add_text("IETF"))
+    check("62225c", "a quote and a backslash", e -> e.add_text("\"\\"))
+    check("62c3bc", "u with an umlaut", e -> e.add_text("ü"))
+    check("63e6b0b4", "the character for water", e -> e.add_text("水"))
+
+@test
+encodes_the_byte_strings() =
+    check("40", "the empty byte string", e -> e.add_bytes([]))
+    check("4401020304", "four bytes", e -> e.add_bytes(unhex("01020304")))
+
+@test
+encodes_the_arrays() =
+    var empty = (e: Encoder) ->
+        e.open_array()
+        e.close_array()
+
+    var three = (e: Encoder) ->
+        e.open_array()
+        e.add_int(1)
+        e.add_int(2)
+        e.add_int(3)
+        e.close_array()
+
+    var nested = (e: Encoder) ->
+        e.open_array()
+        e.add_int(1)
+        e.open_array()
+        e.add_int(2)
+        e.add_int(3)
+        e.close_array()
+        e.open_array()
+        e.add_int(4)
+        e.add_int(5)
+        e.close_array()
+        e.close_array()
+
+    check("80", "[]", empty)
+    check("83010203", "[1, 2, 3]", three)
+    check("8301820203820405", "[1, [2, 3], [4, 5]]", nested)
+
+@test
+encodes_the_maps() =
+    var empty = (e: Encoder) ->
+        e.open_map()
+        e.close_map()
+
+    // Integer labels, which is what a compact protocol uses in place of names.
+    var numbered = (e: Encoder) ->
+        e.open_map()
+        e.label_at(1)
+        e.add_int(2)
+        e.label_at(3)
+        e.add_int(4)
+        e.close_map()
+
+    var with_array = (e: Encoder) ->
+        e.open_map()
+        e.label("a")
+        e.add_int(1)
+        e.label("b")
+        e.open_array()
+        e.add_int(2)
+        e.add_int(3)
+        e.close_array()
+        e.close_map()
+
+    var map_in_array = (e: Encoder) ->
+        e.open_array()
+        e.add_text("a")
+        e.open_map()
+        e.label("b")
+        e.add_text("c")
+        e.close_map()
+        e.close_array()
+
+    check("a0", "{}", empty)
+    check("a201020304", "{1: 2, 3: 4}", numbered)
+    check("a26161016162820203", "{\"a\": 1, \"b\": [2, 3]}", with_array)
+    check("826161a161626163", "[\"a\", {\"b\": \"c\"}]", map_in_array)
+
+// The indefinite-length forms write a break byte instead of a count. RFC 8949 prints these with an
+// underscore in the diagnostic notation.
+@test
+encodes_the_indefinite_length_forms() =
+    var empty = (e: Encoder) ->
+        e.open_array_indefinite()
+        e.close_array_indefinite()
+
+    var mixed = (e: Encoder) ->
+        e.open_array_indefinite()
+        e.add_int(1)
+        e.open_array()
+        e.add_int(2)
+        e.add_int(3)
+        e.close_array()
+        e.open_array_indefinite()
+        e.add_int(4)
+        e.add_int(5)
+        e.close_array_indefinite()
+        e.close_array_indefinite()
+
+    var map = (e: Encoder) ->
+        e.open_map_indefinite()
+        e.label("a")
+        e.add_int(1)
+        e.label("b")
+        e.open_array_indefinite()
+        e.add_int(2)
+        e.add_int(3)
+        e.close_array_indefinite()
+        e.close_map_indefinite()
+
+    check("9fff", "[_ ]", empty)
+    check("9f018202039f0405ffff", "[_ 1, [2, 3], [_ 4, 5]]", mixed)
+    check("bf61610161629f0203ffff", "{_ \"a\": 1, \"b\": [_ 2, 3]}", map)
+
+// ==================================================================================================
+// Tags
+// ==================================================================================================
+
+@test
+encodes_the_tagged_types_from_the_specification() =
+    var b16 = (e: Encoder) ->
+        e.add_tag(tag_enc_as_b16())
+        e.add_bytes(unhex("01020304"))
+
+    var nested_cbor = (e: Encoder) ->
+        e.add_tag(tag_cbor())
+        e.add_bytes(unhex("6449455446"))
+
+    check("c074323031332d30332d32315432303a30343a30305a", "0(\"2013-03-21T20:04:00Z\")",
+          e -> e.add_date_string("2013-03-21T20:04:00Z", true))
+    check("c11a514b67b0", "1(1363896240)", e -> e.add_date_epoch(1363896240, true))
+    check("d74401020304", "23(h'01020304')", b16)
+    check("d818456449455446", "24(h'6449455446')", nested_cbor)
+    check("d82076687474703a2f2f7777772e6578616d706c652e636f6d", "32(\"http://www.example.com\")",
+          e -> e.add_uri("http://www.example.com", true))
+
+// 2^64, which is one more than the largest CBOR unsigned integer and therefore has to be a bignum.
+// RFC 8949 prints it as 2(h'010000000000000000').
+@test
+encodes_a_positive_bignum() =
+    check("c249010000000000000000", "18446744073709551616",
+          e -> e.add_positive_bignum(unhex("010000000000000000"), true))
+
+// **A negative bignum does not carry the magnitude.** Tag 3's content encodes -1 minus the value, so
+// -18446744073709551617 is h'010000000000000000' -- the same bytes as the positive case above under
+// a different tag, which is exactly the trap this test exists to pin.
+@test
+encodes_a_negative_bignum() =
+    check("c349010000000000000000", "-18446744073709551617",
+          e -> e.add_negative_bignum(unhex("010000000000000000"), true))
+
+// Tag 4 is [exponent, mantissa] and the value is mantissa times ten to the exponent. RFC 8949's
+// example is 4([-2, 27315]), which is 273.15.
+@test
+encodes_a_decimal_fraction() =
+    check("c48221196ab3", "4([-2, 27315])", e -> e.add_decimal_fraction(27315, -2, true))
+
+// Tag 5 is the same with a base of two. RFC 8949's example is 5([-1, 3]), which is 1.5.
+@test
+encodes_a_big_float() =
+    check("c5822003", "5([-1, 3])", e -> e.add_big_float(3, -1, true))
+
+// **A tag number is written only when asked for.** The borrowed form writes the content alone, for a
+// protocol whose schema already says what the item is -- and that content is byte-identical to what
+// the tagged form wraps, which is what this pair shows.
+@test
+a_borrowed_tag_writes_the_content_alone() =
+    check("c11a514b67b0", "tagged", e -> e.add_date_epoch(1363896240, true))
+    check("1a514b67b0", "borrowed", e -> e.add_date_epoch(1363896240, false))
+
+// The tag numbers are read from QCBOR's headers rather than written here, so this pins the ones the
+// specification and the CBOR registry fix.
+@test
+the_registered_tag_numbers_are_what_the_registry_says() =
+    assert(tag_date_string() == 0u64, "tag 0 is an RFC 3339 date string")
+    assert(tag_date_epoch() == 1u64, "tag 1 is an epoch date")
+    assert(tag_pos_bignum() == 2u64, "tag 2 is a positive bignum")
+    assert(tag_neg_bignum() == 3u64, "tag 3 is a negative bignum")
+    assert(tag_decimal_fraction() == 4u64, "tag 4 is a decimal fraction")
+    assert(tag_bigfloat() == 5u64, "tag 5 is a big float")
+    assert(tag_enc_as_b64url() == 21u64, "tag 21 is expected-base64url")
+    assert(tag_enc_as_b64() == 22u64, "tag 22 is expected-base64")
+    assert(tag_enc_as_b16() == 23u64, "tag 23 is expected-base16")
+    assert(tag_cbor() == 24u64, "tag 24 is encoded CBOR")
+    assert(tag_uri() == 32u64, "tag 32 is a URI")
+    assert(tag_b64url() == 33u64, "tag 33 is base64url")
+    assert(tag_b64() == 34u64, "tag 34 is base64")
+    assert(tag_regex() == 35u64, "tag 35 is a regular expression")
+    assert(tag_mime() == 36u64, "tag 36 is a MIME message")
+    assert(tag_bin_uuid() == 37u64, "tag 37 is a binary UUID")
+    assert(tag_days_epoch() == 100u64, "tag 100 is an epoch day count")
+    assert(tag_days_string() == 1004u64, "tag 1004 is a full-date string")
+    assert(tag_cbor_magic() == 55799u64, "tag 55799 is the self-describing prefix")
+
+// ==================================================================================================
+// Errors
+// ==================================================================================================
+
+// A buffer too small for what is being written is the ordinary encoding failure, and it arrives at
+// `finish` rather than at the call that overran -- which is QCBOR's design and the reason none of the
+// `add` methods report anything.
+@test
+a_buffer_too_small_is_reported_once_at_the_end() =
+    var out: []u8 = [0u8; 2]
+    var e = encoder(out)
+
+    e.add_text("more than two bytes")
+
+    e.finish() match
+        Ok(_) -> assert(false, "nineteen bytes should not fit in two")
+        Err(why) ->
+            assert(why.kind() == BufferTooSmall, "the buffer was too small")
+            assert(why.message() != "", "QCBOR supplies its own sentence for it")
+
+// An unclosed map is caught at `finish` rather than left to produce truncated CBOR.
+@test
+an_unclosed_map_is_caught() =
+    var out: []u8 = [0u8; 32]
+    var e = encoder(out)
+
+    e.open_map()
+    e.label("a")
+    e.add_int(1)
+
+    e.finish() match
+        Ok(_) -> assert(false, "a map left open should not finish")
+        Err(why) -> assert(why.kind() == ArrayOrMapStillOpen, "the map is still open")
+
+// **A label with no value is NOT caught, and this test exists to pin exactly that.**
+//
+// A map's entries are pairs, so an odd count has no meaning -- but QCBOR does not check. It writes
+// half the item count, rounded down, as the entry count: one item becomes `a0`, an *empty* map, and
+// the orphaned label is left after it as a second top-level data item. `finish` reports success.
+//
+// The test asserts the wrong-looking bytes on purpose. It is not endorsing them -- it is so that if
+// a later QCBOR starts rejecting this, or the binding ever grows a check of its own, the change is
+// noticed here rather than by whoever is reading the output at the far end.
+@test
+a_dangling_label_is_not_caught() =
+    var out: []u8 = [0u8; 32]
+    var e = encoder(out)
+
+    e.open_map()
+    e.label("a")
+    e.close_map()
+
+    assert(done(e, out) == "a06161",
+           "an empty map followed by the orphaned label, and no error at all")
+
+// ==================================================================================================
+// Sizing, position, and the pieces for assembling CBOR by hand
+// ==================================================================================================
+
+// **An encoder given no buffer counts bytes instead of writing them**, which is how a caller sizes a
+// buffer before making one. The count must agree with what the same calls actually write.
+@test
+an_encoder_with_no_buffer_counts_what_it_would_write() =
+    var nothing: []u8 = []
+    var counter = encoder(nothing)
+
+    assert(counter.counting_only(), "an empty buffer is size-calculation mode")
+
+    counter.open_array()
+    counter.add_int(1)
+    counter.add_text("IETF")
+    counter.close_array()
+
+    counter.finish_get_size() match
+        Err(why) -> assert(false, why.message())
+        Ok(size) ->
+            var out: []u8 = [0u8; 64]
+            var e = encoder(out)
+
+            e.open_array()
+            e.add_int(1)
+            e.add_text("IETF")
+            e.close_array()
+
+            assert(done(e, out).bytes.len / 2 == size, "the counted size is what gets written")
+
+// `tell` and `substring` are a pair: note a position, encode, then ask what those items came to.
+//
+// Marked and read at the same nesting level with no close in between, which is the shape that is
+// safe. A CBOR sequence -- several top-level items in a row -- is what this is for.
+@test
+substring_reports_what_was_written_since_a_position() =
+    var out: []u8 = [0u8; 64]
+    var e = encoder(out)
+
+    e.add_int(7)
+
+    val start = e.tell()
+
+    e.add_int(1)
+    e.add_text("IETF")
+
+    val span = e.substring(start)
+
+    // Finished once and held, because `finish` is not idempotent -- calling it twice is how an
+    // earlier draft of this test managed to fail against a correct binding.
+    val encoded = done(e, out)
+
+    assert(encoded == "07016449455446", "7, 1, \"IETF\" as a sequence")
+    assert(hex(out[span.offset..<span.offset + span.len]) == "016449455446",
+           "the two items written since the mark, and not the one before it")
+
+// **A span taken while an array was open is stale once the array closes**, because the array's head
+// is inserted at the position the open happened and shifts everything after it. QCBOR cannot detect
+// this and neither can the binding, so it is written down here as the behaviour a caller must design
+// around rather than left to be discovered.
+@test
+a_span_does_not_survive_the_close_of_an_enclosing_array() =
+    var out: []u8 = [0u8; 64]
+    var e = encoder(out)
+
+    e.open_array()
+
+    val start = e.tell()
+
+    e.add_int(1)
+    e.add_text("IETF")
+
+    val span = e.substring(start)
+
+    e.close_array()
+
+    assert(done(e, out) == "82016449455446", "[1, \"IETF\"]")
+
+    // `tell` answered 0, because the head is not written yet; after the close, offset 0 is the head.
+    assert(span.offset == 0, "the mark was taken before the head existed")
+    assert(hex(out[span.offset..<span.offset + span.len]) == "820164494554",
+           "so the span is off by the one byte the head took")
+
+// A byte string whose content is written straight into the output buffer, with no second copy.
+@test
+open_bytes_writes_into_the_output_buffer() =
+    var out: []u8 = [0u8; 64]
+    var e = encoder(out)
+
+    e.open_bytes() match
+        None -> assert(false, "there should be room")
+        Some(place) ->
+            place[0] = 1u8
+            place[1] = 2u8
+            place[2] = 3u8
+            e.close_bytes(3)
+
+    assert(done(e, out) == "43010203", "h'010203'")
+
+// A byte string whose content is itself CBOR -- how COSE carries a payload whose exact bytes are
+// signed. The span is what a caller would hash.
+@test
+bstr_wrap_reports_where_the_wrapped_bytes_are() =
+    var out: []u8 = [0u8; 64]
+    var e = encoder(out)
+
+    e.bstr_wrap()
+    e.add_int(1)
+    e.add_int(2)
+
+    val span = e.close_bstr_wrap(false)
+    val encoded = done(e, out)
+
+    // Two one-byte items inside a byte string of length two: 42 is the head.
+    assert(encoded == "420102", "a byte string holding 01 02")
+    assert(hex(out[span.offset..<span.offset + span.len]) == "0102",
+           "the span names the content without its head")
+
+// Already-encoded CBOR spliced in as-is, which is what a cache of pre-encoded fragments needs.
+@test
+encoded_bytes_are_spliced_in_unchanged() =
+    var build = (e: Encoder) ->
+        e.open_array()
+        e.add_int(1)
+        e.add_encoded(unhex("02"))
+        e.add_encoded(unhex("03"))
+        e.close_array()
+
+    check("83010203", "[1, 2, 3] built from fragments", build)
+
+// The head of a data item on its own, for a caller assembling CBOR around this binding rather than
+// through it.
+@test
+a_head_can_be_encoded_on_its_own() =
+    var out: []u8 = [0u8; 16]
+
+    assert(head_max() >= 9, "a head is at most nine or ten bytes")
+
+    // Major type 0 is an unsigned integer; a minimum length of 0 lets QCBOR pick the shortest form.
+    encode_head(out, 0u8, 0u8, 1000000u64) match
+        None -> assert(false, "there should be room")
+        Some(n) -> assert(hex(out[0..<n]) == "1a000f4240", "the head of 1000000")
+
+    // Major type 2 is a byte string, and 4 is its length.
+    encode_head(out, 2u8, 0u8, 4u64) match
+        None -> assert(false, "there should be room")
+        Some(n) -> assert(hex(out[0..<n]) == "44", "the head of a four-byte byte string")

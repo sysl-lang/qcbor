@@ -1,85 +1,712 @@
 module sh.sysl.qcbor
 @link("m")
 
+import sysl.text.{from_utf8, from_cstring}
+
 // CBOR (RFC 8949), bound to QCBOR 1.6.1.
 //
 // The C sits beside this file and is compiled as part of the library (`15 §7`), so **nothing has to
-// be installed to use this package** and there is no `@link` here but `m`. See `shim.c` for what only
-// C can reach, and `package.hocon` for why the mathematics is named and no capability is.
+// be installed to use this package**, and the only `@link` is `m` -- the mathematics, which the
+// decoder's numeric coercions reach for and nothing else does. `package.hocon` says why that is a
+// link directive rather than a capability.
+//
+// **QCBOR allocates nothing, and this binding keeps that.** A context is storage the caller supplies;
+// an encoder writes into a buffer the caller supplies; a decoded string is a view into the input the
+// caller supplied. Nothing here calls `malloc`, which is what lets CBOR -- a format designed for
+// constrained devices -- be encoded on one.
+//
+// What crosses the boundary is a pointer and a length, in both directions, because QCBOR says "a
+// string" with a `UsefulBufC` and a struct passed by value has no sysl spelling. `shim.c` splits
+// every one of them, and also reaches the two hundred-odd `static inline` functions that have no
+// symbol for an `extern` to name.
+
+// ==================================================================================================
+// Errors
+// ==================================================================================================
+
+// What went wrong, as QCBOR reports it.
+//
+// **The number is kept rather than discarded** so that `message` is QCBOR's own text for exactly this
+// failure, including for a code this binding has not heard of. `kind` is the matchable form.
+struct Error
+    code: int
+
+    // QCBOR's own description. Never empty: it answers "Unidentified error" for a number it does not
+    // know, and the bytes are static storage in C, so the decode cannot fail on a dangling pointer.
+    message(self) -> string = from_cstring_or(c_error_message(self.code), "unidentified error")
+
+    kind(self) -> ErrorKind = error_kind(c_error_ordinal(self.code))
+
+    // Whether the input is not CBOR at all, as against CBOR this decoder would not accept. The
+    // distinction matters to a protocol that must tell a corrupt message from an unsupported one.
+    not_well_formed(self) -> bool = c_error_is_not_well_formed(self.code) != 0
+
+    // Whether decoding can continue past this. A recoverable error leaves the decoder positioned to
+    // try the next item; an unrecoverable one means the traversal itself is lost.
+    unrecoverable(self) -> bool = c_error_is_unrecoverable(self.code) != 0
+end Error
+
+// An `Error` renders as QCBOR's own sentence for it, so `f"${err}"` and printing a failed `Result`
+// both say something a reader can act on rather than a number.
+impl Display for Error
+    display(self, out: *Writer, fmt: FormatSpec) = display_str(self.message(), out, fmt)
+
+// The failures QCBOR names, for matching on.
+//
+// `Other` exists because a QCBOR newer than this binding may report something not listed here.
+// Answering `Other` keeps such a program running and printing rather than stopping at a `match` with
+// no arm for it, and `Error.code` still carries the number QCBOR gave.
+//
+// **No variant carries a payload, and that is deliberate.** The raw number belongs to `Error`, which
+// is where `message` reads it from; putting it here too would be two places to keep agreeing. It
+// also leaves this a plain enum, so `==` compares two kinds without an `Eq` written over fifty
+// variants by hand.
+enum ErrorKind
+    Success
+    BufferTooSmall
+    EncodeUnsupported
+    BufferTooLarge
+    ArrayNestingTooDeep
+    CloseMismatch
+    ArrayTooLong
+    TooManyCloses
+    ArrayOrMapStillOpen
+    OpenByteString
+    CannotCancel
+    ExtraBytes
+    Unsupported
+    ArrayOrMapUnconsumed
+    BadInt
+    IndefiniteStringChunk
+    HitEnd
+    BadBreak
+    InputTooLarge
+    ArrayDecodeNestingTooDeep
+    ArrayDecodeTooLong
+    StringTooLong
+    BadExpAndMantissa
+    NoStringAllocator
+    StringAllocate
+    MapLabelType
+    BadTagContent
+    IndefLenStringsDisabled
+    IndefLenArraysDisabled
+    TagsDisabled
+    TooManyTags
+    UnexpectedType
+    DuplicateLabel
+    MemPoolSize
+    IntOverflow
+    DateOverflow
+    ExitMismatch
+    NoMoreItems
+    LabelNotFound
+    NumberSignConversion
+    ConversionUnderOverFlow
+    MapNotEntered
+    CallbackFail
+    FloatDateDisabled
+    HalfPrecisionDisabled
+    HwFloatDisabled
+    FloatException
+    AllFloatDisabled
+    RecoverableBadTagContent
+    CannotEnterAllocatedString
+    Other
+end ErrorKind
+
+// **The declaration order above IS the agreement with `shim.c`**, whose `ORDINAL_` list runs down the
+// same names in the same order. Nothing restates it here: the discriminants are implicit, so they are
+// 0 upward in declaration order, and `try` is the fallible constructor `09 §2` provides for exactly
+// this -- an integer off a wire, or out of a C shim, that may not be a declared value.
+//
+// A number this binding has not heard of lands on `Other` rather than trapping, which is what keeps
+// a program running against a QCBOR newer than the list.
+private error_kind(ordinal: int) -> ErrorKind = ErrorKind.try(ordinal).unwrap_or(Other)
+
+// A simple enum carries no `==` of its own (`09 §2`), and comparing two kinds is what a caller
+// branching on a failure does. The discriminant is the comparison, in one line rather than fifty.
+impl Eq for ErrorKind
+    eq(self, rhs: ErrorKind) -> bool = int(self) == int(rhs)
+end ErrorKind
+
+extern "sysl_qcbor_error_ordinal" c_error_ordinal(err: int) -> int
+extern "sysl_qcbor_error_message" c_error_message(err: int) -> *u8
+extern "sysl_qcbor_error_is_not_well_formed" c_error_is_not_well_formed(err: int) -> int
+extern "sysl_qcbor_error_is_unrecoverable" c_error_is_unrecoverable(err: int) -> int
+
+// ==================================================================================================
+// The tag numbers RFC 8949 and the CBOR registry assign
+//
+// These are protocol constants rather than QCBOR's, so they are fixed for all time by IANA, and a
+// caller passing one to `add_tag` is naming something in the format rather than in this library.
+// They are read from the headers by `shim.c` all the same, for the reason `15 §7` gives: a `#define`
+// has no symbol, and a number transcribed into sysl is a number that was right on one machine.
+// ==================================================================================================
+
+extern "sysl_qcbor_tag_date_string" c_tag_date_string() -> u64
+extern "sysl_qcbor_tag_date_epoch" c_tag_date_epoch() -> u64
+extern "sysl_qcbor_tag_pos_bignum" c_tag_pos_bignum() -> u64
+extern "sysl_qcbor_tag_neg_bignum" c_tag_neg_bignum() -> u64
+extern "sysl_qcbor_tag_decimal_fraction" c_tag_decimal_fraction() -> u64
+extern "sysl_qcbor_tag_bigfloat" c_tag_bigfloat() -> u64
+extern "sysl_qcbor_tag_cose_encrypt0" c_tag_cose_encrypt0() -> u64
+extern "sysl_qcbor_tag_cose_mac0" c_tag_cose_mac0() -> u64
+extern "sysl_qcbor_tag_cose_sign1" c_tag_cose_sign1() -> u64
+extern "sysl_qcbor_tag_enc_as_b64url" c_tag_enc_as_b64url() -> u64
+extern "sysl_qcbor_tag_enc_as_b64" c_tag_enc_as_b64() -> u64
+extern "sysl_qcbor_tag_enc_as_b16" c_tag_enc_as_b16() -> u64
+extern "sysl_qcbor_tag_cbor" c_tag_cbor() -> u64
+extern "sysl_qcbor_tag_uri" c_tag_uri() -> u64
+extern "sysl_qcbor_tag_b64url" c_tag_b64url() -> u64
+extern "sysl_qcbor_tag_b64" c_tag_b64() -> u64
+extern "sysl_qcbor_tag_regex" c_tag_regex() -> u64
+extern "sysl_qcbor_tag_mime" c_tag_mime() -> u64
+extern "sysl_qcbor_tag_bin_uuid" c_tag_bin_uuid() -> u64
+extern "sysl_qcbor_tag_cwt" c_tag_cwt() -> u64
+extern "sysl_qcbor_tag_cbor_sequence" c_tag_cbor_sequence() -> u64
+extern "sysl_qcbor_tag_cose_encrypt" c_tag_cose_encrypt() -> u64
+extern "sysl_qcbor_tag_cose_mac" c_tag_cose_mac() -> u64
+extern "sysl_qcbor_tag_cose_sign" c_tag_cose_sign() -> u64
+extern "sysl_qcbor_tag_days_epoch" c_tag_days_epoch() -> u64
+extern "sysl_qcbor_tag_geo_coord" c_tag_geo_coord() -> u64
+extern "sysl_qcbor_tag_binary_mime" c_tag_binary_mime() -> u64
+extern "sysl_qcbor_tag_days_string" c_tag_days_string() -> u64
+extern "sysl_qcbor_tag_cbor_magic" c_tag_cbor_magic() -> u64
+extern "sysl_qcbor_tag_invalid64" c_tag_invalid64() -> u64
+
+// An RFC 3339 date, as text.
+tag_date_string() -> u64 = c_tag_date_string()
+// Seconds since 1970-01-01, as an integer or a float.
+tag_date_epoch() -> u64 = c_tag_date_epoch()
+// An arbitrary-precision integer, big-endian, in a byte string.
+tag_pos_bignum() -> u64 = c_tag_pos_bignum()
+// The same, for a negative value: the bytes encode -1 minus the number.
+tag_neg_bignum() -> u64 = c_tag_neg_bignum()
+// `[exponent, mantissa]`, the value being mantissa times ten to the exponent.
+tag_decimal_fraction() -> u64 = c_tag_decimal_fraction()
+// The same with a base of two.
+tag_bigfloat() -> u64 = c_tag_bigfloat()
+tag_cose_encrypt0() -> u64 = c_tag_cose_encrypt0()
+tag_cose_mac0() -> u64 = c_tag_cose_mac0()
+tag_cose_sign1() -> u64 = c_tag_cose_sign1()
+// "Render this item as base64url if it is converted to JSON", and its two neighbours.
+tag_enc_as_b64url() -> u64 = c_tag_enc_as_b64url()
+tag_enc_as_b64() -> u64 = c_tag_enc_as_b64()
+tag_enc_as_b16() -> u64 = c_tag_enc_as_b16()
+// A byte string whose content is itself CBOR.
+tag_cbor() -> u64 = c_tag_cbor()
+tag_uri() -> u64 = c_tag_uri()
+tag_b64url() -> u64 = c_tag_b64url()
+tag_b64() -> u64 = c_tag_b64()
+tag_regex() -> u64 = c_tag_regex()
+tag_mime() -> u64 = c_tag_mime()
+tag_bin_uuid() -> u64 = c_tag_bin_uuid()
+tag_cwt() -> u64 = c_tag_cwt()
+tag_cbor_sequence() -> u64 = c_tag_cbor_sequence()
+tag_cose_encrypt() -> u64 = c_tag_cose_encrypt()
+tag_cose_mac() -> u64 = c_tag_cose_mac()
+tag_cose_sign() -> u64 = c_tag_cose_sign()
+// Days since 1970-01-01, and the RFC 3339 full-date text form.
+tag_days_epoch() -> u64 = c_tag_days_epoch()
+tag_days_string() -> u64 = c_tag_days_string()
+tag_geo_coord() -> u64 = c_tag_geo_coord()
+tag_binary_mime() -> u64 = c_tag_binary_mime()
+// The self-describing prefix, `d9 d9f7`, which marks a file as CBOR.
+tag_cbor_magic() -> u64 = c_tag_cbor_magic()
+// The number no tag may have, which is how QCBOR says "no tag here".
+tag_invalid() -> u64 = c_tag_invalid64()
+
+// ==================================================================================================
+// Encoding
+// ==================================================================================================
 
 // The encoding context. QCBOR never allocates: a context is storage the caller supplies, and this is
 // a pointer into that storage. Bodyless because nothing in sysl lays one out -- the size is
-// `sizeof(QCBOREncodeContext)` and only the C knows it.
+// `sizeof(QCBOREncodeContext)` and only the C knows it (`15 §9`).
 opaque struct EncodeCtx
 
 extern "sysl_qcbor_encode_words" c_encode_words() -> usize
 extern "sysl_qcbor_encode_init" c_encode_init(storage: *u64, words: usize, out: *u8,
                                               out_len: usize) -> *EncodeCtx
-extern "sysl_qcbor_encode_add_int64" c_encode_add_int64(ctx: *EncodeCtx, v: long)
-extern "sysl_qcbor_encode_add_text" c_encode_add_text(ctx: *EncodeCtx, p: *u8, n: usize)
-extern "sysl_qcbor_encode_open_map" c_encode_open_map(ctx: *EncodeCtx)
-extern "sysl_qcbor_encode_close_map" c_encode_close_map(ctx: *EncodeCtx)
-extern "sysl_qcbor_encode_finish" c_encode_finish(ctx: *EncodeCtx, len: *usize) -> int
 
-// How many 64-bit words a context needs. The caller sizes storage with this rather than with a number
-// somebody wrote down: `15 §7` is explicit that a transcribed `sizeof` compiles everywhere and is
-// correct on one machine.
+extern "sysl_qcbor_encode_add_int64" c_add_int64(ctx: *EncodeCtx, v: long)
+extern "sysl_qcbor_encode_add_uint64" c_add_uint64(ctx: *EncodeCtx, v: ulong)
+extern "sysl_qcbor_encode_add_double" c_add_double(ctx: *EncodeCtx, v: real)
+extern "sysl_qcbor_encode_add_float" c_add_float(ctx: *EncodeCtx, v: f32)
+extern "sysl_qcbor_encode_add_double_no_preferred" c_add_double_np(ctx: *EncodeCtx, v: real)
+extern "sysl_qcbor_encode_add_float_no_preferred" c_add_float_np(ctx: *EncodeCtx, v: f32)
+
+extern "sysl_qcbor_encode_add_text" c_add_text(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_bytes" c_add_bytes(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_bytes_len_only" c_add_bytes_len_only(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_open_bytes" c_open_bytes(ctx: *EncodeCtx, place: **u8, place_len: *usize)
+extern "sysl_qcbor_encode_close_bytes" c_close_bytes(ctx: *EncodeCtx, amount: usize)
+
+extern "sysl_qcbor_encode_add_bool" c_add_bool(ctx: *EncodeCtx, b: int)
+extern "sysl_qcbor_encode_add_null" c_add_null(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_undef" c_add_undef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_simple" c_add_simple(ctx: *EncodeCtx, v: u8)
+
+extern "sysl_qcbor_encode_add_tag" c_add_tag(ctx: *EncodeCtx, tag: u64)
+extern "sysl_qcbor_encode_add_date_epoch" c_add_date_epoch(ctx: *EncodeCtx, tagged: int, v: long)
+extern "sysl_qcbor_encode_add_days_epoch" c_add_days_epoch(ctx: *EncodeCtx, tagged: int, v: long)
+extern "sysl_qcbor_encode_add_date_string" c_add_date_string(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_days_string" c_add_days_string(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_binary_uuid" c_add_binary_uuid(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_positive_bignum" c_add_pos_bignum(ctx: *EncodeCtx, tagged: int,
+                                                                p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_negative_bignum" c_add_neg_bignum(ctx: *EncodeCtx, tagged: int,
+                                                                p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_decimal_fraction" c_add_decimal_fraction(ctx: *EncodeCtx, tagged: int,
+                                                                       mantissa: long,
+                                                                       exponent: long)
+extern "sysl_qcbor_encode_add_decimal_fraction_bignum" c_add_decimal_fraction_big(
+    ctx: *EncodeCtx, tagged: int, p: *u8, n: usize, negative: int, exponent: long)
+extern "sysl_qcbor_encode_add_big_float" c_add_big_float(ctx: *EncodeCtx, tagged: int,
+                                                         mantissa: long, exponent: long)
+extern "sysl_qcbor_encode_add_big_float_bignum" c_add_big_float_big(
+    ctx: *EncodeCtx, tagged: int, p: *u8, n: usize, negative: int, exponent: long)
+extern "sysl_qcbor_encode_add_uri" c_add_uri(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_b64_text" c_add_b64(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_b64url_text" c_add_b64url(ctx: *EncodeCtx, tagged: int,
+                                                        p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_regex" c_add_regex(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_mime_data" c_add_mime(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+
+extern "sysl_qcbor_encode_open_array" c_open_array(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_array" c_close_array(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_map" c_open_map(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_map" c_close_map(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_array_indefinite" c_open_array_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_array_indefinite" c_close_array_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_map_indefinite" c_open_map_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_map_indefinite" c_close_map_indef(ctx: *EncodeCtx)
+
+extern "sysl_qcbor_encode_bstr_wrap" c_bstr_wrap(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_bstr_wrap" c_close_bstr_wrap(ctx: *EncodeCtx, include_head: int,
+                                                             offset: *usize, len: *usize)
+extern "sysl_qcbor_encode_cancel_bstr_wrap" c_cancel_bstr_wrap(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_encoded" c_add_encoded(ctx: *EncodeCtx, p: *u8, n: usize)
+
+extern "sysl_qcbor_encode_finish" c_encode_finish(ctx: *EncodeCtx, len: *usize) -> int
+extern "sysl_qcbor_encode_finish_get_size" c_encode_finish_size(ctx: *EncodeCtx, len: *usize) -> int
+extern "sysl_qcbor_encode_get_error" c_encode_get_error(ctx: *EncodeCtx) -> int
+extern "sysl_qcbor_encode_is_buffer_null" c_encode_is_buffer_null(ctx: *EncodeCtx) -> int
+extern "sysl_qcbor_encode_tell" c_encode_tell(ctx: *EncodeCtx) -> usize
+extern "sysl_qcbor_encode_substring" c_encode_substring(ctx: *EncodeCtx, start: usize,
+                                                        offset: *usize, len: *usize)
+extern "sysl_qcbor_encode_head" c_encode_head(out: *u8, out_len: usize, major: u8, min_len: u8,
+                                              number: u64) -> usize
+extern "sysl_qcbor_encode_head_max" c_encode_head_max() -> usize
+
+// How many 64-bit words an encoding context needs. A caller sizes storage with this rather than with
+// a number somebody wrote down: `15 §7` is explicit that a transcribed `sizeof` compiles everywhere
+// and is correct on one machine.
 encode_words() -> usize = c_encode_words()
 
+// The most bytes `encode_head` can write, for sizing the buffer it is given.
+head_max() -> usize = c_encode_head_max()
+
 // An encoder writing into a buffer the caller owns.
+//
+// **No method here reports an error.** QCBOR remembers the first failure and turns every later call
+// into a no-op, so a caller checks once at `finish` rather than after each of forty calls -- which is
+// the design that makes a long encoding sequence readable. `error` is there for a caller who wants to
+// stop early anyway.
+//
+// **A map is a flat sequence of items and its entries are pairs.** There is no `add_int_to_map`
+// family here because QCBOR's own is inline and identical to writing the label and then the value,
+// so `label` and `label_at` compose with *every* value below -- including the ones QCBOR never wrote
+// a labelled form for.
 struct Encoder
+    // **The storage is held here, and that is what makes the pointer beside it safe.** A QCBOR
+    // context lives in storage the caller supplies, and `handle` points into it -- so if the slice
+    // that storage came from were released while the encoder lived, every method below would write
+    // through a dangling pointer. Keeping the slice as a field means the encoder itself is what
+    // keeps it alive, so an `Encoder` may be returned from a function, put in a variable, or passed
+    // on, and the storage goes where it goes.
+    //
+    // A copy of an `Encoder` copies the *view*, not the words, so both copies drive the one context.
+    // That is the intended reading: an encoder is a position in a buffer, and there is only one.
+    storage: []u64
     handle: *EncodeCtx
 
-    add_int(self, v: long) = c_encode_add_int64(self.handle, v)
+    // -- Labels ------------------------------------------------------------------------------------
 
+    // A text label for the entry that follows. `e.label("age"); e.add_int(36)` is one map entry.
+    label(self, name: string) = self.add_text(name)
+
+    // An integer label, which is what a compact protocol uses in place of a name.
+    label_at(self, n: long) = self.add_int(n)
+
+    // -- Numbers -----------------------------------------------------------------------------------
+
+    // A signed integer, in the shortest CBOR form that holds it.
+    add_int(self, v: long) = c_add_int64(self.handle, v)
+
+    // An unsigned integer. Worth reaching for above 2^63, which `add_int` cannot express.
+    add_uint(self, v: ulong) = c_add_uint64(self.handle, v)
+
+    // A double, in the shortest form that holds its exact value -- so 1.0 becomes a two-byte
+    // half-precision item. This is RFC 8949's preferred serialization, and it is what a protocol
+    // wanting deterministic encoding needs.
+    add_double(self, v: real) = c_add_double(self.handle, v)
+
+    add_float(self, v: f32) = c_add_float(self.handle, v)
+
+    // The full eight and four bytes, without the shortening above. For a protocol that fixes the
+    // width, or a reader that cannot do half-precision.
+    add_double_exact(self, v: real) = c_add_double_np(self.handle, v)
+    add_float_exact(self, v: f32) = c_add_float_np(self.handle, v)
+
+    // -- Strings -----------------------------------------------------------------------------------
+
+    // A text string. CBOR text is UTF-8 and a sysl `string` already is, so nothing is validated here.
     add_text(self, s: string)
         val b = s.bytes
 
-        c_encode_add_text(self.handle, first(b), b.len)
+        c_add_text(self.handle, first(b), b.len)
     end add_text
 
-    open_map(self) = c_encode_open_map(self.handle)
-    close_map(self) = c_encode_close_map(self.handle)
+    // A byte string, which in CBOR is a different major type from text and not interchangeable.
+    add_bytes(self, b: []const u8) = c_add_bytes(self.handle, first(b), b.len)
 
-    // How many bytes were written. The error is QCBOR's accumulated one: every `add` above is silent
-    // and the first failure is remembered, so a caller checks once here rather than at each call.
-    finish(self) -> Result[usize, int]
+    // The head of a byte string with no content, for computing what an encoding would take without
+    // having the bytes.
+    add_bytes_len_only(self, b: []const u8) = c_add_bytes_len_only(self.handle, first(b), b.len)
+
+    // Open a byte string whose content is written into the output buffer directly, then say how much
+    // was written. This is what avoids a second copy when the content is produced by something that
+    // can write into a slice -- a hash, a cipher, a nested encoder.
+    //
+    // `None` when there is no room left, or when the encoder is only counting bytes.
+    open_bytes(self) -> Option[[]u8]
+        var place: *u8 = null
+        var n: usize = 0
+
+        c_open_bytes(self.handle, &place, &n)
+
+        if place == null || n == 0 then None else Some(place[0..<n])
+    end open_bytes
+
+    close_bytes(self, written: usize) = c_close_bytes(self.handle, written)
+
+    // -- Simple values -----------------------------------------------------------------------------
+
+    add_bool(self, b: bool) = c_add_bool(self.handle, if b then 1 else 0)
+
+    // CBOR's null and undefined are two different simple values, and a protocol that means "absent"
+    // should say which one it means.
+    add_null(self) = c_add_null(self.handle)
+    add_undef(self) = c_add_undef(self.handle)
+
+    // A simple value by number, for the ones CBOR has not named. 0 to 19 and 32 to 255 are available;
+    // 20 to 23 are false, true, null and undefined and have methods above.
+    add_simple(self, v: u8) = c_add_simple(self.handle, v)
+
+    // -- Tags --------------------------------------------------------------------------------------
+
+    // A tag number, applying to the item added next. The `tag_*` functions above name the registered
+    // ones; any number may be passed.
+    add_tag(self, tag: u64) = c_add_tag(self.handle, tag)
+
+    // The tagged types QCBOR knows how to write. **`tagged` chooses whether the tag number itself is
+    // written**: `true` produces a self-describing item, and `false` produces the content alone, for
+    // a protocol whose schema already says what the bytes are. QCBOR calls the second "borrowed".
+    add_date_epoch(self, seconds: long, tagged: bool) =
+        c_add_date_epoch(self.handle, flag(tagged), seconds)
+
+    add_days_epoch(self, days: long, tagged: bool) =
+        c_add_days_epoch(self.handle, flag(tagged), days)
+
+    add_date_string(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_date_string(self.handle, flag(tagged), first(b), b.len)
+    end add_date_string
+
+    add_days_string(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_days_string(self.handle, flag(tagged), first(b), b.len)
+    end add_days_string
+
+    add_binary_uuid(self, b: []const u8, tagged: bool) =
+        c_add_binary_uuid(self.handle, flag(tagged), first(b), b.len)
+
+    // An arbitrary-precision integer, big-endian, most significant byte first.
+    //
+    // **The negative form does not encode the magnitude.** RFC 8949 says the bytes of tag 3 encode
+    // -1 minus the value, so -1 is an empty or zero byte string and -256 is `ff`. Passing the
+    // magnitude produces a number one too large, and nothing will tell you.
+    add_positive_bignum(self, b: []const u8, tagged: bool) =
+        c_add_pos_bignum(self.handle, flag(tagged), first(b), b.len)
+
+    add_negative_bignum(self, b: []const u8, tagged: bool) =
+        c_add_neg_bignum(self.handle, flag(tagged), first(b), b.len)
+
+    // Mantissa times ten to the exponent, as tag 4 -- the way to carry a decimal amount without a
+    // binary float's rounding. `(273, -2)` is 2.73 exactly.
+    add_decimal_fraction(self, mantissa: long, exponent: long, tagged: bool) =
+        c_add_decimal_fraction(self.handle, flag(tagged), mantissa, exponent)
+
+    // The same with a mantissa too large for a `long`, which then has the sign convention of
+    // `add_negative_bignum` when `negative` is true.
+    add_decimal_fraction_bignum(self, mantissa: []const u8, negative: bool, exponent: long,
+                                tagged: bool) =
+        c_add_decimal_fraction_big(self.handle, flag(tagged), first(mantissa), mantissa.len,
+                                   flag(negative), exponent)
+
+    // Mantissa times two to the exponent, as tag 5.
+    add_big_float(self, mantissa: long, exponent: long, tagged: bool) =
+        c_add_big_float(self.handle, flag(tagged), mantissa, exponent)
+
+    add_big_float_bignum(self, mantissa: []const u8, negative: bool, exponent: long, tagged: bool) =
+        c_add_big_float_big(self.handle, flag(tagged), first(mantissa), mantissa.len,
+                            flag(negative), exponent)
+
+    add_uri(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_uri(self.handle, flag(tagged), first(b), b.len)
+    end add_uri
+
+    add_b64(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_b64(self.handle, flag(tagged), first(b), b.len)
+    end add_b64
+
+    add_b64url(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_b64url(self.handle, flag(tagged), first(b), b.len)
+    end add_b64url
+
+    add_regex(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_regex(self.handle, flag(tagged), first(b), b.len)
+    end add_regex
+
+    // A MIME message, headers and all, as tag 36.
+    add_mime(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_mime(self.handle, flag(tagged), first(b), b.len)
+    end add_mime
+
+    // -- Structure ---------------------------------------------------------------------------------
+
+    // An array, whose length CBOR writes once the close tells QCBOR what it is. Everything added
+    // between the two is an element.
+    open_array(self) = c_open_array(self.handle)
+    close_array(self) = c_close_array(self.handle)
+
+    // A map, whose entries are the label/value pairs added between the two.
+    //
+    // **A label with no value is not caught, and the output is silently wrong.** QCBOR counts the
+    // items between the two calls and writes *half* that as the entry count, rounding down, so a map
+    // holding one item encodes as `a0` -- an empty map -- with the orphaned item left sitting after
+    // it as a second top-level data item. `finish` reports success. This was measured, not assumed:
+    // `a_dangling_label_is_not_caught` in `tests.sysl` pins the bytes.
+    //
+    // Nothing here defends against it, because a binding that counted items would be a second
+    // implementation of the nesting bookkeeping and would disagree with QCBOR's own somewhere. What
+    // it costs is a rule the caller has to keep: **every `label` is followed by exactly one value**.
+    open_map(self) = c_open_map(self.handle)
+    close_map(self) = c_close_map(self.handle)
+
+    // The indefinite-length forms, which write a break byte instead of a count. Worth the extra byte
+    // only when the length genuinely is not known in advance -- a stream being forwarded as it
+    // arrives. **RFC 8949's deterministic encoding forbids them**, so a protocol that hashes its CBOR
+    // wants the definite forms above.
+    open_array_indefinite(self) = c_open_array_indef(self.handle)
+    close_array_indefinite(self) = c_close_array_indef(self.handle)
+    open_map_indefinite(self) = c_open_map_indef(self.handle)
+    close_map_indefinite(self) = c_close_map_indef(self.handle)
+
+    // A byte string whose content is itself CBOR -- how COSE carries a payload whose exact bytes are
+    // signed. Everything encoded between the two calls becomes the content.
+    bstr_wrap(self) = c_bstr_wrap(self.handle)
+
+    // Close it, answering where the wrapped bytes sit in the output buffer. The answer is an offset
+    // and a length rather than a slice because the buffer is the caller's and slicing it here would
+    // hand back a second view of storage they already hold.
+    //
+    // `include_head` decides whether the byte string's own head is part of the answer, which is what
+    // a caller hashing the wrapped CBOR needs to choose.
+    close_bstr_wrap(self, include_head: bool) -> Span
+        var offset: usize = 0
+        var n: usize = 0
+
+        c_close_bstr_wrap(self.handle, flag(include_head), &offset, &n)
+        Span(offset, n)
+    end close_bstr_wrap
+
+    // Abandon a `bstr_wrap`, discarding what was written inside it. For a caller who discovers the
+    // wrapped content was not needed after all.
+    cancel_bstr_wrap(self) = c_cancel_bstr_wrap(self.handle)
+
+    // Splice in bytes that are already CBOR, without checking them. Whatever is passed becomes part
+    // of the output as-is, so it had better be well-formed and exactly one data item.
+    add_encoded(self, b: []const u8) = c_add_encoded(self.handle, first(b), b.len)
+
+    // -- Finishing and inspection ------------------------------------------------------------------
+
+    // How many bytes were written. The error is the first one QCBOR met anywhere in the sequence.
+    finish(self) -> Result[usize, Error]
         var n: usize = 0
         val err = c_encode_finish(self.handle, &n)
 
-        if err == 0 then Ok(n) else Err(err)
+        if err == 0 then Ok(n) else Err(Error(err))
     end finish
+
+    // The same, for an encoder that was given no buffer and is only counting.
+    finish_get_size(self) -> Result[usize, Error]
+        var n: usize = 0
+        val err = c_encode_finish_size(self.handle, &n)
+
+        if err == 0 then Ok(n) else Err(Error(err))
+    end finish_get_size
+
+    // The first failure so far, or `None`. For stopping a long sequence early rather than at `finish`.
+    error(self) -> Option[Error]
+        val err = c_encode_get_error(self.handle)
+
+        if err == 0 then None else Some(Error(err))
+    end error
+
+    // Whether this encoder is only counting bytes, having been given an empty output buffer.
+    counting_only(self) -> bool = c_encode_is_buffer_null(self.handle) != 0
+
+    // How many bytes have been written so far, which is the offset a later `substring` starts from.
+    tell(self) -> usize = c_encode_tell(self.handle)
+
+    // Where the bytes written since `start` sit in the output buffer. The pair with `tell`: record a
+    // position, encode some items, then ask what they came to.
+    //
+    // **Nothing that was open when `tell` was called may have closed before this span is read.**
+    // QCBOR writes a definite-length head only when the array or map closes, and *inserts* it at the
+    // position where the open happened -- so every byte after that point shifts along by the head's
+    // length, and a span taken earlier now names the wrong bytes. QCBOR cannot catch the mistake: its
+    // own source says the offset alone does not carry enough information to tell whether `Tell` came
+    // before or after an `Open`.
+    //
+    // The safe shapes are the two where nothing shifts: mark and read at the same nesting level with
+    // no close between them, or read after the enclosing structure has been closed.
+    substring(self, start: usize) -> Span
+        var offset: usize = 0
+        var n: usize = 0
+
+        c_encode_substring(self.handle, start, &offset, &n)
+        Span(offset, n)
+    end substring
 end Encoder
+
+// A region of the output buffer, as an offset and a length.
+//
+// An offset rather than a slice because the buffer belongs to the caller: handing back a `[]u8` would
+// be a second view of storage they are already holding, and sysl would then have two names for one
+// piece of memory with no way to say they are the same. `buf[s.offset..<s.offset + s.len]` is the
+// slice, made where the buffer is in scope.
+struct Span
+    offset: usize
+    len: usize
+end Span
+
+// Start encoding into `out`.
+//
+// The context's storage is made here and held by the encoder, so there is nothing for a caller to
+// size, keep alive, or pass around beside it. **`out` is the caller's and is not copied** -- the
+// encoder writes into it directly, which is the whole point of a CBOR encoder that allocates nothing
+// per item.
+//
+// **An empty `out` is not an error -- it is QCBOR's size-calculation mode.** Nothing is written and
+// `finish_get_size` reports what the encoding would have taken, which is how a caller sizes a buffer
+// before making one.
+encoder(out: []u8) -> Encoder
+    var storage: []u64 = [0u64; c_encode_words()]
+
+    // Cannot fail: the storage was just sized by asking C what it needs.
+    encoder_with_storage(storage, out).unwrap()
+end encoder
+
+// The same, for a program that will not allocate.
+//
+// `storage` must be at least `encode_words()` long. Sizing it is the caller's only extra step, and
+// what it buys is an encoder with no heap behind it at all -- which is the position an embedded
+// program is in, and the one CBOR exists for.
+//
+// The slice is kept by the returned encoder, so it stays alive as long as the encoder does whatever
+// the caller then does with it.
+encoder_with_storage(storage: []u64, out: []u8) -> Result[Encoder, string]
+    require storage.len > 0, "an encoding context needs storage; size it with encode_words()"
+
+    // **An empty buffer must reach C as a null pointer, not as a pointer to nothing.** QCBOR decides
+    // it is in size-calculation mode by testing the pointer rather than the length, so the scratch
+    // byte `first_mut` hands back for an empty slice -- which is right everywhere else, because C
+    // reads a length beside it -- would put the encoder into ordinary mode over a zero-length buffer
+    // and turn every write into `BufferTooSmall`. This is the one place that distinction is load
+    // bearing, and a test caught it.
+    val ctx = c_encode_init(&storage[0], storage.len,
+                            if out.len == 0 then null else &out[0], out.len)
+
+    if ctx == null then
+        Err("the storage for an encoding context is too small; size it with encode_words()")
+    else
+        Ok(Encoder(storage, ctx))
+end encoder_with_storage
+
+// The head of one data item -- its major type and argument, and nothing else -- written into `out`.
+// Answers how many bytes it took, or `None` when `out` is shorter than `head_max()`.
+//
+// This is for a caller assembling CBOR around this binding rather than through it: computing a length
+// prefix for bytes another library will produce, or writing a streaming header by hand.
+encode_head(out: []u8, major_type: u8, min_len: u8, number: u64) -> Option[usize]
+    val n = c_encode_head(first_mut(out), out.len, major_type, min_len, number)
+
+    if n == 0 then None else Some(n)
+end encode_head
+
+// ==================================================================================================
+// Shared helpers
+// ==================================================================================================
+
+private flag(b: bool) -> int = if b then 1 else 0
 
 // A pointer to the first byte, or to a byte nothing will read.
 //
-// An empty string is a real input -- CBOR encodes `""` as one byte -- and `&b[0]` on an empty slice
-// is an out-of-bounds index, so it traps rather than yielding the null pointer C would accept. C
-// never dereferences the scratch: every call passes the real length beside the pointer, and a length
-// of zero is a loop that does not run.
+// **An empty string is a real input** -- CBOR encodes `""` as one byte and `h''` as another -- and
+// `&b[0]` on an empty slice is an out-of-bounds index, so it traps rather than yielding the null
+// pointer C would accept. C never dereferences the scratch: every call passes the real length beside
+// the pointer, and a length of zero is a loop that does not run.
 private first(b: []const u8) -> *u8
     var scratch: [1]u8
 
     if b.len == 0 then &scratch[0] else &b[0]
 end first
 
-// Start encoding into `out`, with `storage` holding the context.
-//
-// **`storage` must outlive the encoder and must not be copied.** A QCBOR context holds a pointer into
-// itself (`pCurrentNesting`), so a byte-for-byte copy of one leaves that pointer aimed at the
-// original. Keeping the storage in the caller's frame and handing back only a pointer to it is what
-// makes that impossible to get wrong from sysl.
-encoder(storage: []u64, out: []u8) -> Result[Encoder, string]
-    val ctx = c_encode_init(&storage[0], storage.len, first_mut(out), out.len)
-
-    if ctx == null then
-        Err("the storage for an encoding context is too small; size it with encode_words()")
-    else
-        Ok(Encoder(ctx))
-end encoder
-
 private first_mut(b: []u8) -> *u8
     var scratch: [1]u8
 
     if b.len == 0 then &scratch[0] else &b[0]
 end first_mut
+
+// Decode a NUL-terminated string from C, falling back where the bytes are not UTF-8.
+//
+// The fallback keeps the signature honest for text that only ever comes from QCBOR's own static
+// tables: a message that will not decode says the same thing to a caller as no message at all, and a
+// `Result` here would make every caller handle a case that cannot arise from this library.
+private from_cstring_or(p: *u8, fallback: string) -> string
+    if p == null then
+        fallback
+    else
+        from_cstring(p) match
+            Ok(s) -> s
+            Err(_) -> fallback
+end from_cstring_or
