@@ -54,9 +54,12 @@ size_t sysl_qcbor_encode_words(void) {
     return (sizeof(QCBOREncodeContext) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
 }
 
-size_t sysl_qcbor_decode_words(void) {
-    return (sizeof(QCBORDecodeContext) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
-}
+/* The decoder's own storage is `sysl_qcbor_decoder_words`, further down, because
+ * what it sizes is a wrapper holding the context *and* the item slot rather than
+ * the context alone. There is deliberately no second entry point for a bare
+ * QCBORDecodeContext: an item has to live somewhere, and one place to put it is
+ * better than two.
+ */
 
 /* Initialize an encoding context in the caller's storage, over the caller's
  * output buffer. Answers NULL when the storage is too small, which is the one
@@ -92,23 +95,6 @@ QCBOREncodeContext *sysl_qcbor_encode_init(uint64_t *storage, size_t words,
     QCBOREncode_Init((QCBOREncodeContext *)storage, buf);
 
     return (QCBOREncodeContext *)storage;
-}
-
-QCBORDecodeContext *sysl_qcbor_decode_init(uint64_t *storage, size_t words,
-                                           const uint8_t *in, size_t in_len,
-                                           int mode) {
-    UsefulBufC buf;
-
-    if (words * sizeof(uint64_t) < sizeof(QCBORDecodeContext)) {
-        return NULL;
-    }
-
-    buf.ptr = in;
-    buf.len = in_len;
-
-    QCBORDecode_Init((QCBORDecodeContext *)storage, buf, (QCBORDecodeMode)mode);
-
-    return (QCBORDecodeContext *)storage;
 }
 
 /* ===================================================================== *
@@ -655,3 +641,351 @@ uint64_t sysl_qcbor_tag_binary_mime(void)      { return CBOR_TAG_BINARY_MIME; }
 uint64_t sysl_qcbor_tag_days_string(void)      { return CBOR_TAG_DAYS_STRING; }
 uint64_t sysl_qcbor_tag_cbor_magic(void)       { return CBOR_TAG_CBOR_MAGIC; }
 uint64_t sysl_qcbor_tag_invalid64(void)        { return CBOR_TAG_INVALID64; }
+
+/* ===================================================================== *
+ * Decoding
+ *
+ * ==The decoder is a context and one item, and they travel together==
+ *
+ * `QCBORItem` is a struct with two unions and a tag array, and it comes back
+ * *by value* from every function that produces one. sysl can neither lay it out
+ * nor receive it, and passing its two dozen fields back through out-parameters
+ * would be a call with two dozen arguments that grew every time QCBOR added a
+ * type.
+ *
+ * So the item lives here, beside the context, in one wrapper the sysl side holds
+ * a pointer to. A decode writes into `item`, and the accessors below read the
+ * field the caller asks for. That also makes the storage question the same one
+ * the encoder already answered: `sysl_qcbor_decode_words` reports the size of
+ * the *wrapper*, and the caller supplies it.
+ *
+ * The consequence worth knowing is that **there is one item slot**, so the next
+ * decode overwrites the last one -- which is what QCBOR's own model does anyway,
+ * since the strings it hands back point into the input rather than into the
+ * item.
+ * ===================================================================== */
+
+typedef struct {
+    QCBORDecodeContext ctx;
+    QCBORItem          item;
+} SyslDecoder;
+
+size_t sysl_qcbor_decoder_words(void) {
+    return (sizeof(SyslDecoder) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+}
+
+/* The decode modes, whose values are an enum in the header rather than macros --
+ * but crossing them as a small dense integer chosen here keeps sysl from
+ * depending on QCBOR's numbering the way it would if it wrote the numbers.
+ */
+static QCBORDecodeMode decode_mode(int mode) {
+    switch (mode) {
+        case 1:  return QCBOR_DECODE_MODE_MAP_STRINGS_ONLY;
+        case 2:  return QCBOR_DECODE_MODE_MAP_AS_ARRAY;
+        default: return QCBOR_DECODE_MODE_NORMAL;
+    }
+}
+
+SyslDecoder *sysl_qcbor_decoder_init(uint64_t *storage, size_t words,
+                                     const uint8_t *in, size_t in_len, int mode) {
+    SyslDecoder *d;
+    UsefulBufC buf;
+
+    if (words * sizeof(uint64_t) < sizeof(SyslDecoder)) {
+        return NULL;
+    }
+
+    d = (SyslDecoder *)storage;
+
+    buf.ptr = in;
+    buf.len = in_len;
+
+    memset(&d->item, 0, sizeof(d->item));
+    QCBORDecode_Init(&d->ctx, buf, decode_mode(mode));
+
+    return d;
+}
+
+/* -- Item kinds ----------------------------------------------------------- *
+ *
+ * QCBOR's QCBOR_TYPE_ numbers are sparse and run past 78 with gaps. The sysl
+ * side has an enum, so the translation is a switch here for the same reason the
+ * error one is: every QCBOR constant stays in C, and sysl holds only its own
+ * dense ordinals, in the declaration order of `ItemKind`.
+ */
+
+#define KIND_NONE                       0
+#define KIND_INT                        1
+#define KIND_UINT                       2
+#define KIND_ARRAY                      3
+#define KIND_MAP                        4
+#define KIND_BYTE_STRING                5
+#define KIND_TEXT_STRING                6
+#define KIND_POS_BIGNUM                 7
+#define KIND_NEG_BIGNUM                 8
+#define KIND_DATE_STRING                9
+#define KIND_DATE_EPOCH                10
+#define KIND_UNKNOWN_SIMPLE            11
+#define KIND_DECIMAL_FRACTION          12
+#define KIND_DECIMAL_FRACTION_POS_BIG  13
+#define KIND_DECIMAL_FRACTION_NEG_BIG  14
+#define KIND_BIG_FLOAT                 15
+#define KIND_BIG_FLOAT_POS_BIG         16
+#define KIND_BIG_FLOAT_NEG_BIG         17
+#define KIND_FALSE                     18
+#define KIND_TRUE                      19
+#define KIND_NULL                      20
+#define KIND_UNDEF                     21
+#define KIND_FLOAT                     22
+#define KIND_DOUBLE                    23
+#define KIND_MAP_AS_ARRAY              24
+#define KIND_URI                       25
+#define KIND_BASE64URL                 26
+#define KIND_BASE64                    27
+#define KIND_REGEX                     28
+#define KIND_MIME                      29
+#define KIND_UUID                      30
+#define KIND_BINARY_MIME               31
+#define KIND_DAYS_STRING               32
+#define KIND_DAYS_EPOCH                33
+#define KIND_OTHER                     34
+
+static int kind_of(uint8_t type) {
+    switch (type) {
+        case QCBOR_TYPE_NONE:          return KIND_NONE;
+        case QCBOR_TYPE_INT64:         return KIND_INT;
+        case QCBOR_TYPE_UINT64:        return KIND_UINT;
+        case QCBOR_TYPE_ARRAY:         return KIND_ARRAY;
+        case QCBOR_TYPE_MAP:           return KIND_MAP;
+        case QCBOR_TYPE_BYTE_STRING:   return KIND_BYTE_STRING;
+        case QCBOR_TYPE_TEXT_STRING:   return KIND_TEXT_STRING;
+        case QCBOR_TYPE_POSBIGNUM:     return KIND_POS_BIGNUM;
+        case QCBOR_TYPE_NEGBIGNUM:     return KIND_NEG_BIGNUM;
+        case QCBOR_TYPE_DATE_STRING:   return KIND_DATE_STRING;
+        case QCBOR_TYPE_DATE_EPOCH:    return KIND_DATE_EPOCH;
+        case QCBOR_TYPE_UKNOWN_SIMPLE: return KIND_UNKNOWN_SIMPLE;
+        case QCBOR_TYPE_DECIMAL_FRACTION:            return KIND_DECIMAL_FRACTION;
+        case QCBOR_TYPE_DECIMAL_FRACTION_POS_BIGNUM: return KIND_DECIMAL_FRACTION_POS_BIG;
+        case QCBOR_TYPE_DECIMAL_FRACTION_NEG_BIGNUM: return KIND_DECIMAL_FRACTION_NEG_BIG;
+        case QCBOR_TYPE_BIGFLOAT:                    return KIND_BIG_FLOAT;
+        case QCBOR_TYPE_BIGFLOAT_POS_BIGNUM:         return KIND_BIG_FLOAT_POS_BIG;
+        case QCBOR_TYPE_BIGFLOAT_NEG_BIGNUM:         return KIND_BIG_FLOAT_NEG_BIG;
+        case QCBOR_TYPE_FALSE:         return KIND_FALSE;
+        case QCBOR_TYPE_TRUE:          return KIND_TRUE;
+        case QCBOR_TYPE_NULL:          return KIND_NULL;
+        case QCBOR_TYPE_UNDEF:         return KIND_UNDEF;
+        case QCBOR_TYPE_FLOAT:         return KIND_FLOAT;
+        case QCBOR_TYPE_DOUBLE:        return KIND_DOUBLE;
+        case QCBOR_TYPE_MAP_AS_ARRAY:  return KIND_MAP_AS_ARRAY;
+        case QCBOR_TYPE_URI:           return KIND_URI;
+        case QCBOR_TYPE_BASE64URL:     return KIND_BASE64URL;
+        case QCBOR_TYPE_BASE64:        return KIND_BASE64;
+        case QCBOR_TYPE_REGEX:         return KIND_REGEX;
+        case QCBOR_TYPE_MIME:          return KIND_MIME;
+        case QCBOR_TYPE_UUID:          return KIND_UUID;
+        case QCBOR_TYPE_BINARY_MIME:   return KIND_BINARY_MIME;
+        case QCBOR_TYPE_DAYS_STRING:   return KIND_DAYS_STRING;
+        case QCBOR_TYPE_DAYS_EPOCH:    return KIND_DAYS_EPOCH;
+        default:                       return KIND_OTHER;
+    }
+}
+
+/* -- Traversal ------------------------------------------------------------ */
+
+/* The next item in pre-order, decoded into the wrapper's slot.
+ *
+ * `GetNext` rather than `VGetNext`: the two differ only in whether the error is
+ * returned or stashed in the context, and a binding that answers a Result wants
+ * it returned. `v_next` below is the stashing one, for the spiffy sequences
+ * where checking once at the end is the point.
+ */
+int sysl_qcbor_decode_next(SyslDecoder *d) {
+    return (int)QCBORDecode_GetNext(&d->ctx, &d->item);
+}
+
+int sysl_qcbor_decode_v_next(SyslDecoder *d) {
+    QCBORDecode_VGetNext(&d->ctx, &d->item);
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* The next item without consuming it, so the same item comes back next time. */
+int sysl_qcbor_decode_peek(SyslDecoder *d) {
+    return (int)QCBORDecode_PeekNext(&d->ctx, &d->item);
+}
+
+int sysl_qcbor_decode_v_peek(SyslDecoder *d) {
+    QCBORDecode_VPeekNext(&d->ctx, &d->item);
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* The next item, and everything inside it if it is a map or an array -- the way
+ * to skip a subtree whose content does not matter.
+ */
+int sysl_qcbor_decode_next_consume(SyslDecoder *d) {
+    QCBORDecode_VGetNextConsume(&d->ctx, &d->item);
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* -- Reading the decoded item --------------------------------------------- */
+
+int sysl_qcbor_item_kind(const SyslDecoder *d)       { return kind_of(d->item.uDataType); }
+int sysl_qcbor_item_label_kind(const SyslDecoder *d) { return kind_of(d->item.uLabelType); }
+
+uint8_t sysl_qcbor_item_nesting(const SyslDecoder *d)      { return d->item.uNestingLevel; }
+uint8_t sysl_qcbor_item_next_nesting(const SyslDecoder *d) { return d->item.uNextNestLevel; }
+
+int64_t  sysl_qcbor_item_int64(const SyslDecoder *d)  { return d->item.val.int64; }
+uint64_t sysl_qcbor_item_uint64(const SyslDecoder *d) { return d->item.val.uint64; }
+double   sysl_qcbor_item_double(const SyslDecoder *d) { return d->item.val.dfnum; }
+float    sysl_qcbor_item_float(const SyslDecoder *d)  { return d->item.val.fnum; }
+uint8_t  sysl_qcbor_item_simple(const SyslDecoder *d) { return d->item.val.uSimple; }
+
+/* An array's or a map's member count. UINT16_MAX means indefinite length, which
+ * the sysl side turns into `None` rather than a number nothing should read.
+ */
+uint16_t sysl_qcbor_item_count(const SyslDecoder *d) { return d->item.val.uCount; }
+
+int sysl_qcbor_count_is_indefinite(uint16_t count) {
+    return count == QCBOR_COUNT_INDICATES_INDEFINITE_LENGTH ? 1 : 0;
+}
+
+/* A string value, or a bignum, which share the `string`/`bigNum` union member.
+ * The pointer is **into the input buffer**, not into the item, so it stays valid
+ * exactly as long as the input does and nothing is copied here.
+ */
+const uint8_t *sysl_qcbor_item_string_ptr(const SyslDecoder *d) {
+    return (const uint8_t *)d->item.val.string.ptr;
+}
+
+size_t sysl_qcbor_item_string_len(const SyslDecoder *d) {
+    return d->item.val.string.len;
+}
+
+int64_t sysl_qcbor_item_epoch_seconds(const SyslDecoder *d) {
+    return d->item.val.epochDate.nSeconds;
+}
+
+double sysl_qcbor_item_epoch_fraction(const SyslDecoder *d) {
+    return d->item.val.epochDate.fSecondsFraction;
+}
+
+int64_t sysl_qcbor_item_epoch_days(const SyslDecoder *d) { return d->item.val.epochDays; }
+
+/* A decimal fraction or a big float, whose value is a mantissa and an exponent.
+ * When the mantissa is too large for an int64 the type says so -- the four
+ * `_POS_BIG` / `_NEG_BIG` kinds -- and the mantissa is then the byte string the
+ * accessors above report.
+ */
+int64_t sysl_qcbor_item_exponent(const SyslDecoder *d) {
+    return d->item.val.expAndMantissa.nExponent;
+}
+
+int64_t sysl_qcbor_item_mantissa(const SyslDecoder *d) {
+    return d->item.val.expAndMantissa.Mantissa.nInt;
+}
+
+const uint8_t *sysl_qcbor_item_mantissa_ptr(const SyslDecoder *d) {
+    return (const uint8_t *)d->item.val.expAndMantissa.Mantissa.bigNum.ptr;
+}
+
+size_t sysl_qcbor_item_mantissa_len(const SyslDecoder *d) {
+    return d->item.val.expAndMantissa.Mantissa.bigNum.len;
+}
+
+int64_t  sysl_qcbor_item_label_int64(const SyslDecoder *d)  { return d->item.label.int64; }
+uint64_t sysl_qcbor_item_label_uint64(const SyslDecoder *d) { return d->item.label.uint64; }
+
+const uint8_t *sysl_qcbor_item_label_string_ptr(const SyslDecoder *d) {
+    return (const uint8_t *)d->item.label.string.ptr;
+}
+
+size_t sysl_qcbor_item_label_string_len(const SyslDecoder *d) {
+    return d->item.label.string.len;
+}
+
+/* -- Tags on the decoded item --------------------------------------------- */
+
+/* The nth tag number on the item, innermost first, or CBOR_TAG_INVALID64 when
+ * there are no more. QCBOR maps tag numbers above 16 bits into a small table, so
+ * this call rather than the item's own array is what a caller must use.
+ */
+uint64_t sysl_qcbor_item_tag(SyslDecoder *d, uint32_t index) {
+    return QCBORDecode_GetNthTag(&d->ctx, &d->item, index);
+}
+
+uint64_t sysl_qcbor_last_tag(SyslDecoder *d, uint32_t index) {
+    return QCBORDecode_GetNthTagOfLast(&d->ctx, index);
+}
+
+/* How many tags an item can carry, so a caller can bound a loop without
+ * transcribing QCBOR_MAX_TAGS_PER_ITEM.
+ */
+uint32_t sysl_qcbor_max_tags_per_item(void) { return QCBOR_MAX_TAGS_PER_ITEM; }
+
+/* -- Position, errors and finishing --------------------------------------- */
+
+int sysl_qcbor_decode_finish(SyslDecoder *d) {
+    return (int)QCBORDecode_Finish(&d->ctx);
+}
+
+int sysl_qcbor_decode_partial_finish(SyslDecoder *d, size_t *consumed) {
+    return (int)QCBORDecode_PartialFinish(&d->ctx, consumed);
+}
+
+size_t sysl_qcbor_decode_tell(SyslDecoder *d) { return QCBORDecode_Tell(&d->ctx); }
+
+/* Whether the traversal has reached the end of the input, without consuming
+ * anything to find out.
+ */
+int sysl_qcbor_decode_at_end(SyslDecoder *d) {
+    return QCBORDecode_EndCheck(&d->ctx) == QCBOR_ERR_NO_MORE_ITEMS ? 1 : 0;
+}
+
+void sysl_qcbor_decode_rewind(SyslDecoder *d) { QCBORDecode_Rewind(&d->ctx); }
+
+int sysl_qcbor_decode_get_error(SyslDecoder *d) {
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_decode_get_and_reset_error(SyslDecoder *d) {
+    return (int)QCBORDecode_GetAndResetError(&d->ctx);
+}
+
+void sysl_qcbor_decode_set_error(SyslDecoder *d, int err) {
+    QCBORDecode_SetError(&d->ctx, (QCBORError)err);
+}
+
+/* The bytes of the input that have not been consumed, as an offset and a length,
+ * for a caller decoding a CBOR sequence one item at a time.
+ */
+void sysl_qcbor_decode_undecoded(SyslDecoder *d, size_t *offset, size_t *len) {
+    UsefulBufC rest = QCBORDecode_RetrieveUndecodedInput(&d->ctx);
+
+    *offset = QCBORDecode_Tell(&d->ctx);
+    *len    = rest.ptr == NULL ? 0 : rest.len - *offset;
+}
+
+/* -- The string allocator for indefinite-length strings -------------------- *
+ *
+ * An indefinite-length string arrives in chunks, and joining them needs storage
+ * somewhere. QCBOR does not allocate, so it asks the caller for a pool -- which
+ * keeps this binding allocator-free too, since the pool is an ordinary slice.
+ *
+ * Without one, an indefinite-length string decodes as
+ * QCBOR_ERR_NO_STRING_ALLOCATOR rather than silently as something else.
+ */
+int sysl_qcbor_decode_set_mem_pool(SyslDecoder *d, uint8_t *pool, size_t pool_len,
+                                   int all_strings) {
+    UsefulBuf p;
+
+    p.ptr = pool;
+    p.len = pool_len;
+
+    return (int)QCBORDecode_SetMemPool(&d->ctx, p, all_strings ? true : false);
+}
+
+/* The smallest pool QCBOR will accept, which is its own bookkeeping overhead. */
+size_t sysl_qcbor_mem_pool_overhead(void) { return QCBOR_DECODE_MIN_MEM_POOL_SIZE; }

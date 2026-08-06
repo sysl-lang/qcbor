@@ -576,3 +576,311 @@ a_head_can_be_encoded_on_its_own() =
     encode_head(out, 2u8, 0u8, 4u64) match
         None -> assert(false, "there should be room")
         Some(n) -> assert(hex(out[0..<n]) == "44", "the head of a four-byte byte string")
+
+// ==================================================================================================
+// Decoding — the same RFC 8949 vectors, read the other way
+// ==================================================================================================
+
+// **An `Option` carries no `==`, whatever it holds** (`14`, recorded there as a catalog omission
+// rather than a language gap: `impl[T: Eq] Eq for Option[T]` is writable, and the open question is
+// whether the whole generic family joins the catalog at once). So a test that wants "this item holds
+// this value" takes the option apart, and these say it once each instead of at every assertion.
+
+private is_int(item: Item, want: long) -> bool =
+    item.int_value() match
+        None -> false
+        Some(v) -> v == want
+
+private is_uint(item: Item, want: ulong) -> bool =
+    item.uint_value() match
+        None -> false
+        Some(v) -> v == want
+
+private is_double(item: Item, want: real) -> bool =
+    item.double_value() match
+        None -> false
+        Some(v) -> v == want
+
+private is_bool(item: Item, want: bool) -> bool =
+    item.bool_value() match
+        None -> false
+        Some(v) -> v == want
+
+private is_simple(item: Item, want: u8) -> bool =
+    item.simple_value() match
+        None -> false
+        Some(v) -> v == want
+
+private is_text(item: Item, want: string) -> bool =
+    item.text() match
+        None -> false
+        Some(r) ->
+            r match
+                Err(_) -> false
+                Ok(s) -> s == want
+
+private is_label(item: Item, want: string) -> bool =
+    item.label() match
+        None -> false
+        Some(r) ->
+            r match
+                Err(_) -> false
+                Ok(s) -> s == want
+
+private is_label_int(item: Item, want: long) -> bool =
+    item.label_int() match
+        None -> false
+        Some(v) -> v == want
+
+private is_count(item: Item, want: usize) -> bool =
+    item.count() match
+        None -> false
+        Some(v) -> v == want
+
+private has_count(item: Item) -> bool =
+    item.count() match
+        None -> false
+        Some(_) -> true
+
+private has_int(item: Item) -> bool =
+    item.int_value() match
+        None -> false
+        Some(_) -> true
+
+// An optional byte string as hexadecimal, so an assertion compares one thing rather than unwrapping.
+private hex_or_empty(b: Option[[]const u8]) -> string =
+    b match
+        None -> ""
+        Some(v) -> hex(v)
+
+private finished(d: Decoder) -> bool =
+    d.finish() match
+        Ok(_) -> true
+        Err(_) -> false
+
+// Decode the one item `cbor` holds, so a test can ask whatever it likes about it.
+private only(cbor: string) -> Item
+    var d = decoder(unhex(cbor), Normal)
+
+    d.next() match
+        Err(why) -> panic(s"decoding $cbor: ${why.message()}")
+        Ok(item) -> item
+end only
+
+@test
+decodes_the_integers() =
+    assert(is_int(only("00"), 0), "0")
+    assert(is_int(only("17"), 23), "23")
+    assert(is_int(only("1818"), 24), "24")
+    assert(is_int(only("1903e8"), 1000), "1000")
+    assert(is_int(only("1a000f4240"), 1000000), "1000000")
+    assert(is_int(only("1b000000e8d4a51000"), 1000000000000), "1000000000000")
+    assert(is_int(only("20"), -1), "-1")
+    assert(is_int(only("3863"), -100), "-100")
+    assert(is_int(only("3903e7"), -1000), "-1000")
+
+// **The largest CBOR unsigned integer does not fit a signed 64-bit value**, so QCBOR reports it as
+// `Uint` rather than `Int` and `int_value` declines. That split is the whole reason the two
+// accessors exist, and this is what pins it.
+@test
+the_largest_unsigned_integer_decodes_as_a_uint() =
+    val item = only("1bffffffffffffffff")
+
+    assert(item.kind() == Uint, "too large for a signed long")
+    assert(!has_int(item), "so the signed accessor declines")
+    assert(is_uint(item, 18446744073709551615u64), "18446744073709551615")
+
+@test
+decodes_the_floats() =
+    assert(is_double(only("f93c00"), 1.0), "1.0 from a half")
+    assert(is_double(only("f93e00"), 1.5), "1.5 from a half")
+    assert(is_double(only("fb3ff199999999999a"), 1.1), "1.1 from a double")
+    assert(is_double(only("fa47c35000"), 100000.0), "100000.0 from a single")
+
+// Half and single precision both widen to a double on the way in, which is QCBOR's preferred-float
+// behaviour and the reason `Float` is rare rather than impossible.
+@test
+narrow_floats_arrive_as_doubles() =
+    assert(only("f93c00").kind() == Double, "a half decodes as a double")
+    assert(only("fa47c35000").kind() == Double, "a single decodes as a double")
+
+@test
+decodes_the_simple_values() =
+    assert(is_bool(only("f4"), false), "false")
+    assert(is_bool(only("f5"), true), "true")
+    assert(only("f6").kind() == Null, "null")
+    assert(only("f7").kind() == Undef, "undefined")
+    assert(is_simple(only("f0"), 16u8), "simple(16)")
+    assert(is_simple(only("f8ff"), 255u8), "simple(255)")
+
+@test
+decodes_the_text_strings() =
+    val ietf = only("6449455446")
+
+    assert(ietf.kind() == TextString, "a text string")
+    assert(is_text(ietf, "IETF"), "IETF")
+    assert(is_text(only("60"), ""), "the empty string")
+    assert(is_text(only("62c3bc"), "ü"), "u with an umlaut")
+    assert(is_text(only("63e6b0b4"), "水"), "the character for water")
+
+@test
+decodes_the_byte_strings() =
+    val four = only("4401020304")
+
+    assert(four.kind() == ByteString, "a byte string")
+    assert(hex_or_empty(four.bytes()) == "01020304", "four bytes")
+    assert(only("40").kind() == ByteString, "the empty byte string is still a byte string")
+
+// **A decoded string is a view into the input, not a copy.** That is what makes decoding
+// allocator-free, and it is the property a caller has to know about: the slice dies with the input.
+// Writing through the input and reading the slice back is the only way to show it rather than say it.
+@test
+a_decoded_string_views_the_input() =
+    var input = unhex("6449455446")
+    var d = decoder(input, Normal)
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(item) ->
+            item.bytes() match
+                None -> assert(false, "there are bytes")
+                Some(b) ->
+                    assert(hex(b) == "49455446", "the four bytes of IETF")
+
+                    input[1] = 0x4au8
+
+                    assert(hex(b) == "4a455446", "the slice is the input, not a copy of it")
+
+// `text`, by contrast, is the one accessor that copies -- which is what makes it safe to keep.
+@test
+text_copies_where_bytes_does_not() =
+    var input = unhex("6449455446")
+    var d = decoder(input, Normal)
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(item) ->
+            item.text() match
+                None -> assert(false, "there is text")
+                Some(r) ->
+                    r match
+                        Err(_) -> assert(false, "IETF is valid UTF-8")
+                        Ok(s) ->
+                            input[1] = 0x4au8
+
+                            assert(s == "IETF", "the string was copied out before the input moved")
+
+// ==================================================================================================
+// Structure
+// ==================================================================================================
+
+@test
+decodes_an_array_head_and_its_members() =
+    var d = decoder(unhex("83010203"), Normal)
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(head) ->
+            assert(head.kind() == Array, "an array")
+            assert(is_count(head, 3), "of three members")
+
+    // The members follow as ordinary items, one nesting level deeper.
+    var seen = 0
+
+    while seen < 3
+        d.next() match
+            Err(why) -> assert(false, why.message())
+            Ok(item) ->
+                assert(is_int(item, long(seen + 1)), "the members in order")
+                assert(item.nesting() == 1u8, "one level in")
+                seen = seen + 1
+
+    assert(finished(d), "and the input is exhausted")
+
+@test
+decodes_a_map_with_its_labels() =
+    // {"a": 1, "b": [2, 3]}
+    var d = decoder(unhex("a26161016162820203"), Normal)
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(head) ->
+            assert(head.kind() == Map, "a map")
+            assert(is_count(head, 2), "of two entries")
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(first) ->
+            assert(is_label(first, "a"), "labelled a")
+            assert(is_int(first, 1), "with the value 1")
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(second) ->
+            assert(is_label(second, "b"), "labelled b")
+            assert(second.kind() == Array, "whose value is an array")
+
+// An integer label is what a compact protocol uses, and it arrives through a different accessor.
+@test
+decodes_integer_labels() =
+    // {1: 2, 3: 4}
+    var d = decoder(unhex("a201020304"), Normal)
+
+    d.next()
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(entry) ->
+            assert(is_label_int(entry, 1), "the label 1")
+            assert(is_int(entry, 2), "the value 2")
+
+// **An indefinite-length array reports no count**, so a reader watches the nesting level instead --
+// which is the one loop shape that works for both kinds of array.
+@test
+an_indefinite_array_has_no_count_and_ends_by_nesting() =
+    // [_ 1, 2]
+    var d = decoder(unhex("9f0102ff"), Normal)
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(head) ->
+            assert(head.kind() == Array, "an array")
+            assert(!has_count(head), "with no count to report")
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(first) -> assert(first.next_nesting() == 1u8, "another member follows at this level")
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(last) ->
+            assert(is_int(last, 2), "the last member")
+            assert(last.next_nesting() == 0u8, "and the level closed after it")
+
+// Skipping a subtree whose content does not matter, in one call rather than by counting members.
+@test
+next_consume_skips_a_whole_subtree() =
+    // [[1, 2, 3], 9]
+    var d = decoder(unhex("828301020309"), Normal)
+
+    d.next()
+    d.next_consume()
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(after) -> assert(is_int(after, 9), "the item after the skipped array")
+
+// Peeking does not advance, so the same item arrives again.
+@test
+peek_does_not_consume() =
+    var d = decoder(unhex("83010203"), Normal)
+
+    d.next()
+
+    d.peek() match
+        Err(why) -> assert(false, why.message())
+        Ok(peeked) -> assert(is_int(peeked, 1), "the next member, unconsumed")
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(item) -> assert(is_int(item, 1), "and it is still there")
