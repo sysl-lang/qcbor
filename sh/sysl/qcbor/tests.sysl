@@ -1614,3 +1614,63 @@ a_caller_can_supply_its_own_allocator() =
         Ok(item) -> assert(is_text(item, "streaming"), "the chunks joined in the caller's arena")
 
     assert(arena.used > 0, "and the arena is where they went")
+
+// ==================================================================================================
+// The README's examples
+//
+// **The README is reading material, so its programs are compiled here rather than trusted.** These
+// are the same calls in the same order; only the `send` at the end of the encoding one is dropped,
+// since that stands for whatever the reader does with the bytes.
+// ==================================================================================================
+
+@test
+the_readme_encoding_example_works() =
+    var out: []u8 = [0u8; 256]
+    var e = encoder(out)
+
+    e.open_map()
+    e.label("name")
+    e.add_text("ada")
+    e.label("born")
+    e.add_int(1815)
+    e.label("tags")
+    e.open_array()
+    e.add_text("mathematician")
+    e.add_text("writer")
+    e.close_array()
+    e.close_map()
+
+    e.finish() match
+        Err(why) -> assert(false, why.message())
+        Ok(n) ->
+            // a3 opens a map of three; each entry is its label then its value, in the order they
+            // were written. 190717 is 1815, and 82 opens the two-element array of tags.
+            assert(hex(out[0..<n]) ==
+                   "a3646e616d65636164616462" +
+                   "6f726e1907176474616773826d6d617468" +
+                   "656d6174696369616e66777269746572",
+                   "the map encodes exactly")
+
+            // Read it back by label, which is the README's second decoding example.
+            var d = decoder(out[0..<n], Normal)
+
+            d.enter_map()
+
+            assert(int_of(d.get_int_in_map("born"), -1) == 1815, "born is 1815")
+            assert(text_of(d.get_text_bytes_in_map("name"), "") == "ada", "name is ada")
+
+            d.exit_map()
+
+            assert(finished(d), "and that was the whole message")
+
+// The README's first decoding example — item by item, matching on what turns up.
+@test
+the_readme_item_by_item_example_works() =
+    var d = decoder(unhex("6449455446"), Normal)
+
+    d.next() match
+        Err(why) -> assert(false, why.message())
+        Ok(item) ->
+            item.kind() match
+                TextString -> assert(is_text(item, "IETF"), "a text string")
+                _ -> assert(false, "it is a text string")
