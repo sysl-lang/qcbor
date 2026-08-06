@@ -1,0 +1,54 @@
+module sh.sysl.qcbor
+
+import sysl.text.str_builder_with_capacity
+
+// The binding's own tests, run by `sysl test .`.
+//
+// Every expected byte string below is from RFC 8949 itself -- appendix A is a table of CBOR
+// encodings, and the diagnostic notation beside each one says what it means -- so a test that passes
+// says the bytes crossed the boundary intact, and a binding that swapped two arguments or dropped a
+// length could not make one pass by coincidence.
+
+private nib(c: u8) -> u8 = if c >= 97 then c - 87 elif c >= 65 then c - 55 else c - 48
+
+private unhex(s: string) -> []u8
+    require s.bytes.len % 2 == 0, "a hexadecimal byte string has an even number of digits"
+
+    val b = s.bytes
+    var out: []u8 = [0u8; b.len / 2]
+
+    for i in 0..<out.len do out[i] = nib(b[i * 2]) * 16 + nib(b[i * 2 + 1])
+
+    out
+end unhex
+
+private hex_digit(v: u8) -> char = if v < 10 then char(48u32 + u32(v)) else char(87u32 + u32(v))
+
+private hex(bytes: []const u8) -> string
+    var b = str_builder_with_capacity(bytes.len * 2)
+
+    for x in bytes
+        b.push_char(hex_digit(x >> 4))
+        b.push_char(hex_digit(x & 15))
+
+    b.finish()
+end hex
+
+@test
+encodes_a_small_map() =
+    var storage: []u64 = [0u64; encode_words()]
+    var out: []u8 = [0u8; 64]
+
+    encoder(storage, out) match
+        Err(why) -> assert(false, why)
+        Ok(e) ->
+            e.open_map()
+            e.add_text("a")
+            e.add_int(1)
+            e.close_map()
+
+            e.finish() match
+                Err(code) -> assert(false, f"encoding failed with ${code}")
+
+                // RFC 8949 appendix A: {"a": 1} is a1 61 61 01.
+                Ok(n) -> assert(hex(out[0..<n]) == "a1616101", "{\"a\": 1}")

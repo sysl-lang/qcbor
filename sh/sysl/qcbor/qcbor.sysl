@@ -1,5 +1,85 @@
 module sh.sysl.qcbor
 @link("m")
 
-// Placeholder while the vendored C is proved to build. Replaced by the binding.
-private probe() -> int = 0
+// CBOR (RFC 8949), bound to QCBOR 1.6.1.
+//
+// The C sits beside this file and is compiled as part of the library (`15 §7`), so **nothing has to
+// be installed to use this package** and there is no `@link` here but `m`. See `shim.c` for what only
+// C can reach, and `package.hocon` for why the mathematics is named and no capability is.
+
+// The encoding context. QCBOR never allocates: a context is storage the caller supplies, and this is
+// a pointer into that storage. Bodyless because nothing in sysl lays one out -- the size is
+// `sizeof(QCBOREncodeContext)` and only the C knows it.
+opaque struct EncodeCtx
+
+extern "sysl_qcbor_encode_words" c_encode_words() -> usize
+extern "sysl_qcbor_encode_init" c_encode_init(storage: *u64, words: usize, out: *u8,
+                                              out_len: usize) -> *EncodeCtx
+extern "sysl_qcbor_encode_add_int64" c_encode_add_int64(ctx: *EncodeCtx, v: long)
+extern "sysl_qcbor_encode_add_text" c_encode_add_text(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_open_map" c_encode_open_map(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_map" c_encode_close_map(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_finish" c_encode_finish(ctx: *EncodeCtx, len: *usize) -> int
+
+// How many 64-bit words a context needs. The caller sizes storage with this rather than with a number
+// somebody wrote down: `15 §7` is explicit that a transcribed `sizeof` compiles everywhere and is
+// correct on one machine.
+encode_words() -> usize = c_encode_words()
+
+// An encoder writing into a buffer the caller owns.
+struct Encoder
+    handle: *EncodeCtx
+
+    add_int(self, v: long) = c_encode_add_int64(self.handle, v)
+
+    add_text(self, s: string)
+        val b = s.bytes
+
+        c_encode_add_text(self.handle, first(b), b.len)
+    end add_text
+
+    open_map(self) = c_encode_open_map(self.handle)
+    close_map(self) = c_encode_close_map(self.handle)
+
+    // How many bytes were written. The error is QCBOR's accumulated one: every `add` above is silent
+    // and the first failure is remembered, so a caller checks once here rather than at each call.
+    finish(self) -> Result[usize, int]
+        var n: usize = 0
+        val err = c_encode_finish(self.handle, &n)
+
+        if err == 0 then Ok(n) else Err(err)
+    end finish
+end Encoder
+
+// A pointer to the first byte, or to a byte nothing will read.
+//
+// An empty string is a real input -- CBOR encodes `""` as one byte -- and `&b[0]` on an empty slice
+// is an out-of-bounds index, so it traps rather than yielding the null pointer C would accept. C
+// never dereferences the scratch: every call passes the real length beside the pointer, and a length
+// of zero is a loop that does not run.
+private first(b: []const u8) -> *u8
+    var scratch: [1]u8
+
+    if b.len == 0 then &scratch[0] else &b[0]
+end first
+
+// Start encoding into `out`, with `storage` holding the context.
+//
+// **`storage` must outlive the encoder and must not be copied.** A QCBOR context holds a pointer into
+// itself (`pCurrentNesting`), so a byte-for-byte copy of one leaves that pointer aimed at the
+// original. Keeping the storage in the caller's frame and handing back only a pointer to it is what
+// makes that impossible to get wrong from sysl.
+encoder(storage: []u64, out: []u8) -> Result[Encoder, string]
+    val ctx = c_encode_init(&storage[0], storage.len, first_mut(out), out.len)
+
+    if ctx == null then
+        Err("the storage for an encoding context is too small; size it with encode_words()")
+    else
+        Ok(Encoder(ctx))
+end encoder
+
+private first_mut(b: []u8) -> *u8
+    var scratch: [1]u8
+
+    if b.len == 0 then &scratch[0] else &b[0]
+end first_mut

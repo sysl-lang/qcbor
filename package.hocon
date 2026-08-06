@@ -1,8 +1,20 @@
 // CBOR (RFC 8949), bound to QCBOR.
 //
-// There is no `dependencies` block because dependency resolution is designed and not yet built
-// (packages.md sections 3 to 6); this package is consumed today with `build-lib` and `--lib`, the way
-// any sysl library is.
+// There is no `dependencies` block because QCBOR depends on nothing: it includes `<stdint.h>`,
+// `<stddef.h>`, `<string.h>`, and -- only for the numeric coercions noted below -- `<math.h>` and
+// `<fenv.h>`. Nothing sysl could fetch is among them.
+//
+// This is the block a *consumer* writes to reach this package, and resolution for it is built
+// (`packages.md` §§ 3-6): a `sysl build` fetches the coordinate, selects by MVS, checks what arrived
+// against `sysl.sum`, and compiles it as more modules.
+//
+//     dependencies {
+//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.1.0" }
+//     }
+//
+// The coordinate is identity rather than a URL, so it carries no `https://`, and the version is a
+// tag `v0.1.0` on this repository. `build-lib` and `--lib` still work and are what the tests here
+// use, but they are no longer the only way in.
 
 // `name` is the package; the module a program imports is `sh.sysl.qcbor`, and the two are
 // deliberately different. The module carries the `sh.sysl.` prefix so that no package claims a
