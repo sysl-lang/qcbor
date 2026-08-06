@@ -735,6 +735,9 @@ extern "sysl_qcbor_decode_set_mem_pool" c_decode_set_mem_pool(d: *DecodeCtx, poo
                                                               pool_len: usize,
                                                               all_strings: int) -> int
 extern "sysl_qcbor_mem_pool_overhead" c_mem_pool_overhead() -> usize
+extern "sysl_qcbor_decode_set_allocator" c_decode_set_allocator(
+    d: *DecodeCtx, allocate: *extern(*u8, *u8, usize, **u8, *usize) -> int, ctx: *u8,
+    all_strings: int)
 
 // What a decoded item is. The names are CBOR's and QCBOR's, and the order is `shim.c`'s `KIND_` list
 // -- the same arrangement `ErrorKind` uses and for the same reason.
@@ -952,6 +955,31 @@ struct Decoder
 
         if err == 0 then Ok(()) else Err(Error(err))
     end set_mem_pool
+
+    // Install an allocator of the caller's own in place of the pool.
+    //
+    // `set_mem_pool` is QCBOR's own allocator over storage you supplied, and it is what nearly every
+    // program wants. This is for the one that does not: an allocator reusing storage across decodes,
+    // or drawing from an arena the rest of the program shares.
+    //
+    // **`allocate` is a bare C function** (`12 §6a`) and is called in three modes, which it tells
+    // apart from its arguments:
+    //
+    //   - `old_mem` null and `size` above zero -- allocate that many bytes;
+    //   - `old_mem` set -- resize it, or free it when `size` is zero;
+    //   - `old_mem` null and `size` zero -- the decode has finished, which is the moment to release
+    //     whatever the allocator itself is holding. Note that the *strings* usually outlive this.
+    //
+    // It answers zero and writes the block through its two out-parameters, or non-zero to say it
+    // could not. `ctx` is passed through untouched and is where an allocator keeps its state, since
+    // a C function has no environment of its own.
+    //
+    // The shape is out-parameters rather than a returned block because QCBOR's own callback hands
+    // back a `UsefulBuf` **by value**, and a two-word C aggregate is exactly what `15 §7` says not to
+    // transcribe into sysl. `shim.c` adapts between the two.
+    set_allocator(self, allocate: *extern(*u8, *u8, usize, **u8, *usize) -> int, ctx: *u8,
+                  all_strings: bool) =
+        c_decode_set_allocator(self.handle, allocate, ctx, flag(all_strings))
 
     // ----------------------------------------------------------------------------------------------
     // Spiffy decode

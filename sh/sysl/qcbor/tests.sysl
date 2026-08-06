@@ -1541,3 +1541,76 @@ an_unknown_error_number_still_reports() =
     assert(unknown.kind() == Other, "it lands on the catch-all")
     assert(unknown.message() != "", "and QCBOR still names it")
     assert(unknown.code == 200, "with the original number kept")
+
+// ==================================================================================================
+// An allocator of the caller's own
+// ==================================================================================================
+
+// What a bump allocator needs to remember: the block it draws from, how much is gone, and where the
+// most recent allocation started.
+//
+// **This is what `ctx` is for.** A C callback has no environment (`12 § 6a`), so an allocator's state
+// has to arrive through the one pointer QCBOR passes back untouched. Keeping it in a struct the test
+// owns -- rather than in module storage -- is also what keeps `bump` an ordinary module function: a
+// function that read a top-level binding of the entry file would become a *nested* function of that
+// file's body (`13 § 7`), and a nested function has no address to take.
+struct Arena
+    block: []u8
+    used: usize
+    last: usize
+end Arena
+
+// A bump allocator, in the shape QCBOR's string allocator takes. It answers zero and writes the block
+// through the out-parameters, or non-zero to refuse.
+//
+// **The reallocation mode is the one that matters and the one that is easy to get wrong.** An
+// indefinite-length string arrives in chunks and QCBOR *grows* the block as each arrives -- and it
+// grows it **in place**, which its own `MemPool_Function` does by returning the same pointer with a
+// larger size. A first version of this allocator handed back fresh memory instead and the joined
+// string came out as only its last chunk, which is what a test asserting the whole string is for.
+private bump(ctx: *u8, old_mem: *u8, size: usize, out_ptr: **u8, out_len: *usize) -> int
+    var arena: *Arena = ptr_cast(ctx)
+
+    // A free, and the destruct call at `finish`: a bump allocator honours neither and need not.
+    if size == 0 then
+        return 0
+
+    if old_mem != null then
+        // Grow the most recent allocation where it stands, which is all QCBOR asks for.
+        if (*arena).last + size > (*arena).block.len then
+            return 1
+
+        (*arena).used = (*arena).last + size
+
+        *out_ptr = &(*arena).block[(*arena).last]
+        *out_len = size
+
+        return 0
+
+    if (*arena).used + size > (*arena).block.len then
+        return 1
+
+    (*arena).last = (*arena).used
+
+    *out_ptr = &(*arena).block[(*arena).used]
+    *out_len = size
+
+    (*arena).used = (*arena).used + size
+
+    0
+end bump
+
+@test
+a_caller_can_supply_its_own_allocator() =
+    // (_ "strea", "ming") -- RFC 8949 appendix A, which needs somewhere to join the two chunks.
+    var d = decoder(unhex("7f657374726561646d696e67ff"), Normal)
+    var block: []u8 = [0u8; 256]
+    var arena = Arena(block, 0, 0)
+
+    d.set_allocator(&bump, ptr_cast(&arena), false)
+
+    d.next() match
+        Err(e) -> assert(false, e.message())
+        Ok(item) -> assert(is_text(item, "streaming"), "the chunks joined in the caller's arena")
+
+    assert(arena.used > 0, "and the arena is where they went")

@@ -665,9 +665,30 @@ uint64_t sysl_qcbor_tag_invalid64(void)        { return CBOR_TAG_INVALID64; }
  * item.
  * ===================================================================== */
 
+/* A caller's own string allocator, in the shape sysl can express.
+ *
+ * QCBOR's `QCBORStringAllocate` returns a `UsefulBuf` **by value**, and sysl has
+ * no spelling for that -- a `*extern` can be called with C's convention, but the
+ * type it returns has to be one sysl can name, and a two-word aggregate whose
+ * layout is C's is exactly what `15 § 7` says not to transcribe.
+ *
+ * So the sysl side's allocator answers through out-parameters instead, and
+ * `allocator_thunk` below is the C function QCBOR actually gets. Non-zero from
+ * the sysl side means the allocation failed, which becomes the NULL buffer
+ * QCBOR reads as failure.
+ */
+typedef int (*SyslAllocate)(void *ctx, uint8_t *old_mem, size_t new_size,
+                            uint8_t **out_ptr, size_t *out_len);
+
 typedef struct {
     QCBORDecodeContext ctx;
     QCBORItem          item;
+    /* The caller's allocator, if one was installed. It lives here rather than in
+     * a static because a program may be decoding two things at once, and because
+     * QCBOR takes one `void *` of context and this is what has to be behind it.
+     */
+    SyslAllocate       allocate;
+    void              *allocate_ctx;
 } SyslDecoder;
 
 size_t sysl_qcbor_decoder_words(void) {
@@ -700,7 +721,14 @@ SyslDecoder *sysl_qcbor_decoder_init(uint64_t *storage, size_t words,
     buf.ptr = in;
     buf.len = in_len;
 
+    /* The item slot and the allocator hooks, but not the context: QCBORDecode_Init
+     * initializes its own, and would undo anything written into it first.
+     */
     memset(&d->item, 0, sizeof(d->item));
+
+    d->allocate     = NULL;
+    d->allocate_ctx = NULL;
+
     QCBORDecode_Init(&d->ctx, buf, decode_mode(mode));
 
     return d;
@@ -1001,6 +1029,44 @@ int sysl_qcbor_decode_set_mem_pool(SyslDecoder *d, uint8_t *pool, size_t pool_le
     p.len = pool_len;
 
     return (int)QCBORDecode_SetMemPool(&d->ctx, p, all_strings ? true : false);
+}
+
+/* The C function QCBOR is given, which forwards to the sysl one. */
+static UsefulBuf allocator_thunk(void *cxt, void *old_mem, size_t new_size) {
+    SyslDecoder *d   = (SyslDecoder *)cxt;
+    UsefulBuf    out = NULLUsefulBuf;
+    uint8_t     *p   = NULL;
+    size_t       n   = 0;
+
+    if (d->allocate == NULL) {
+        return out;
+    }
+
+    if (d->allocate(d->allocate_ctx, (uint8_t *)old_mem, new_size, &p, &n) == 0) {
+        out.ptr = p;
+        out.len = n;
+    }
+
+    return out;
+}
+
+/* Install a caller's own allocator in place of the pool.
+ *
+ * The pool above is QCBOR's own allocator over storage the caller supplied, and
+ * it is what nearly every program wants. This is for the one that does not: an
+ * allocator that reuses storage across decodes, or draws from an arena the rest
+ * of the program shares.
+ *
+ * The three modes QCBOR calls it in are described at `QCBORStringAllocate` in
+ * `qcbor_decode.h`: allocate (old_mem NULL, size > 0), free or resize (old_mem
+ * set), and destruct (old_mem NULL, size 0) at `finish`.
+ */
+void sysl_qcbor_decode_set_allocator(SyslDecoder *d, SyslAllocate fn, void *ctx,
+                                     int all_strings) {
+    d->allocate     = fn;
+    d->allocate_ctx = ctx;
+
+    QCBORDecode_SetUpAllocator(&d->ctx, allocator_thunk, d, all_strings ? true : false);
 }
 
 /* The smallest pool QCBOR will accept, which is its own bookkeeping overhead. */
