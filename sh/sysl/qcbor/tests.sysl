@@ -912,6 +912,21 @@ private failed(r: Result[long, Error]) -> bool =
         Err(_) -> true
         Ok(_) -> false
 
+private failed_unit(r: Result[unit, Error]) -> bool =
+    r match
+        Err(_) -> true
+        Ok(_) -> false
+
+private failed_bytes(r: Result[[]const u8, Error]) -> bool =
+    r match
+        Err(_) -> true
+        Ok(_) -> false
+
+private failed_double(r: Result[real, Error]) -> bool =
+    r match
+        Err(_) -> true
+        Ok(_) -> false
+
 private why(r: Result[long, Error]) -> ErrorKind =
     r match
         Err(e) -> e.kind()
@@ -1022,3 +1037,273 @@ enters_an_array_and_reads_it_in_order() =
 
     d.exit_array()
     d.exit_map()
+
+// ==================================================================================================
+// Spiffy decode — tagged types
+// ==================================================================================================
+
+// 1(1363896240), from RFC 8949's table.
+@test
+reads_an_epoch_date() =
+    var d = decoder(unhex("c11a514b67b0"), Normal)
+
+    assert(int_of(d.get_epoch_date(Required), -1) == 1363896240, "the tagged form")
+
+// **The borrowed form is the same content with no tag**, and asking for it under `Absent` is how a
+// protocol whose schema already says "this is a date" reads one.
+@test
+reads_a_borrowed_epoch_date() =
+    var d = decoder(unhex("1a514b67b0"), Normal)
+
+    assert(int_of(d.get_epoch_date(Absent), -1) == 1363896240, "the borrowed form")
+
+// And asking for the wrong one is a failure rather than a wrong answer.
+//
+// **A decoder per case, because errors are sticky.** An earlier version of this test reused one
+// decoder for all three and the third failed -- correctly: a decoder that has met an error turns
+// every later call into a no-op reporting that same error, which is exactly the property that lets a
+// run of getters be checked once at the end.
+@test
+a_tag_requirement_is_enforced() =
+    var tagged = decoder(unhex("c11a514b67b0"), Normal)
+    var bare = decoder(unhex("1a514b67b0"), Normal)
+    var either = decoder(unhex("c11a514b67b0"), Normal)
+
+    assert(failed(tagged.get_epoch_date(Absent)), "a tag was there and should not have been")
+    assert(failed(bare.get_epoch_date(Required)), "a tag was required and was not there")
+    assert(!failed(either.get_epoch_date(Optional)), "either is accepted")
+
+@test
+reads_a_uri() =
+    var d = decoder(unhex("d82076687474703a2f2f7777772e6578616d706c652e636f6d"), Normal)
+
+    assert(text_of(d.get_uri(Required), "") == "http://www.example.com", "the URI")
+
+// 2(h'010000000000000000') is 2^64. **The sign is the tag, not the bytes**, and this pins that the
+// binding reports it separately rather than folding it in.
+@test
+reads_a_positive_bignum() =
+    var d = decoder(unhex("c249010000000000000000"), Normal)
+
+    d.get_bignum(Required) match
+        Err(e) -> assert(false, e.message())
+        Ok(n) ->
+            assert(hex(n.bytes) == "010000000000000000", "the magnitude bytes")
+            assert(!n.negative, "and it is positive")
+
+@test
+reads_a_negative_bignum() =
+    var d = decoder(unhex("c349010000000000000000"), Normal)
+
+    d.get_bignum(Required) match
+        Err(e) -> assert(false, e.message())
+        Ok(n) ->
+            assert(hex(n.bytes) == "010000000000000000", "the same bytes as the positive case")
+            assert(n.negative, "under the tag that makes them -1 minus the value")
+
+// 4([-2, 27315]) is 273.15.
+@test
+reads_a_decimal_fraction() =
+    var d = decoder(unhex("c48221196ab3"), Normal)
+
+    d.get_decimal_fraction(Required) match
+        Err(e) -> assert(false, e.message())
+        Ok(v) ->
+            assert(v.mantissa == 27315, "the mantissa")
+            assert(v.exponent == -2, "and the base-ten exponent")
+
+// 5([-1, 3]) is 1.5.
+@test
+reads_a_big_float() =
+    var d = decoder(unhex("c5822003"), Normal)
+
+    d.get_big_float(Required) match
+        Err(e) -> assert(false, e.message())
+        Ok(v) ->
+            assert(v.mantissa == 3, "the mantissa")
+            assert(v.exponent == -1, "and the base-two exponent")
+
+// The `_big` forms take a scratch buffer, because a negative bignum mantissa has to be
+// sign-converted and the converted bytes are not in the input.
+@test
+reads_a_decimal_fraction_with_a_wide_mantissa() =
+    // 4([-2, 2(h'010000000000000000')])
+    var d = decoder(unhex("c48221c249010000000000000000"), Normal)
+    var scratch: []u8 = [0u8; 32]
+
+    d.get_decimal_fraction_big(scratch, Required) match
+        Err(e) -> assert(false, e.message())
+        Ok(v) ->
+            assert(hex(v.bytes) == "010000000000000000", "the wide mantissa")
+            assert(!v.negative, "positive")
+            assert(v.exponent == -2, "and the exponent")
+
+// ==================================================================================================
+// Spiffy decode — converting getters
+// ==================================================================================================
+
+// **One number written two ways is one number to the reader.** A protocol that has been through more
+// than one implementation gets an amount as an integer from one peer and a float from another, and
+// `convert` is what accepts both without the caller branching.
+@test
+a_converting_getter_accepts_more_than_one_type() =
+    val accepted = convert_int() | convert_float()
+
+    var whole = decoder(unhex("03"), Normal)
+    var fractional = decoder(unhex("f94200"), Normal)
+
+    assert(double_of(whole.get_double_convert(accepted), -1.0) == 3.0, "3 as a double")
+    assert(double_of(fractional.get_double_convert(accepted), -1.0) == 3.0, "3.0 as a double")
+
+// **`convert_all` is what reaches the mathematics.** Evaluating 4([-2, 27315]) as a double is
+// `pow`, which is the only reason this package's module names `m` in its `@link` -- so a green run of
+// this test is also what proves that link is right.
+@test
+convert_all_evaluates_a_decimal_fraction() =
+    var d = decoder(unhex("c48221196ab3"), Normal)
+    val accepted = convert_int() | convert_decimal_fraction()
+
+    val v = double_of(d.get_double_convert_all(accepted), -1.0)
+
+    assert(v > 273.149 && v < 273.151, "4([-2, 27315]) evaluates to 273.15")
+
+// A type outside the accepted set is refused rather than coerced.
+@test
+a_converting_getter_refuses_what_it_was_not_told_to_accept() =
+    var d = decoder(unhex("f94200"), Normal)
+
+    assert(failed(d.get_int_convert(convert_int())), "a float is not in the accepted set")
+
+// ==================================================================================================
+// Bstr-wrapped CBOR, and subtrees as bytes
+// ==================================================================================================
+
+// The decoding half of the encoder's `bstr_wrap` -- how COSE reads a payload whose exact bytes were
+// signed. The bytes come back as well as being entered, which is what a caller verifying a signature
+// needs.
+@test
+enters_bstr_wrapped_cbor() =
+    // A byte string holding the CBOR for [1, 2].
+    var d = decoder(unhex("43820102"), Normal)
+
+    d.enter_bstr_wrapped(Absent) match
+        Err(e) -> assert(false, e.message())
+        Ok(raw) -> assert(hex(raw) == "820102", "the wrapped bytes, for hashing")
+
+    d.enter_array()
+
+    assert(int_of(d.get_int(), -1) == 1, "and the content decodes")
+    assert(int_of(d.get_int(), -1) == 2, "both of it")
+
+    d.exit_array()
+    d.exit_bstr_wrapped()
+
+// A whole subtree as the bytes that encode it, without decoding inside -- for forwarding it
+// untouched, or hashing exactly what a signature covers.
+@test
+reads_a_nested_map_as_bytes() =
+    // {"outer": {"inner": 7}}
+    var d = decoder(unhex("a1656f75746572a165696e6e657207"), Normal)
+
+    d.enter_map()
+
+    d.get_map_bytes_in_map("outer") match
+        Err(e) -> assert(false, e.message())
+        Ok(raw) -> assert(hex(raw) == "a165696e6e657207", "the nested map, undecoded")
+
+    d.exit_map()
+
+// ==================================================================================================
+// Several labels in one pass
+// ==================================================================================================
+
+@test
+fetches_several_labels_in_one_pass() =
+    var d = decoder(sample(), Normal)
+    var wanted = item_list(d)
+
+    wanted.want("a", Int)
+    wanted.want("c", Unset)
+
+    d.enter_map()
+
+    d.get_items(wanted) match
+        Err(e) -> assert(false, e.message())
+        Ok(_) ->
+            wanted.at(0) match
+                None -> assert(false, "the first result")
+                Some(item) -> assert(is_int(item, 1), "a is 1")
+
+            wanted.at(1) match
+                None -> assert(false, "the second result")
+                Some(item) -> assert(is_bool(item, true), "c is true")
+
+    // Past the last label there is nothing.
+    wanted.at(2) match
+        None -> assert(true, "nothing past the last label")
+        Some(_) -> assert(false, "only two labels were asked for")
+
+    d.exit_map()
+
+// **The callback sees the entries the list did NOT ask for**, which is QCBOR's rule and not the
+// obvious reading. It is therefore not a validator for the values being fetched -- it is where a
+// protocol decides what to do about a field its schema does not know.
+//
+// The first version of these two tests asked for the same label the callback then refused, and
+// passed for the wrong reason: the callback never ran at all. `qcbor_decode.c` guards the call with
+// `if(!bMatched && pCallBack != NULL)`.
+//
+// **The callback is a bare C function** -- `*extern(*u8, *u8) -> int`, whose address `&f` takes
+// (`12 § 6a`). It has no environment, so everything it needs arrives as its two arguments, and
+// `staged` turns them into an `Item`.
+private refuse_unknown(ctx: *u8, item: *u8) -> int
+    // Reached only for a label the list did not ask for, so its mere existence is the refusal.
+    val ignored = staged(ctx, item)
+
+    callback_fail()
+end refuse_unknown
+
+// Nothing is left over, so the callback never fires and the read succeeds.
+@test
+a_callback_is_silent_when_the_schema_covers_the_map() =
+    var d = decoder(sample(), Normal)
+    var wanted = item_list(d)
+
+    wanted.want("a", Int)
+    wanted.want("b", TextString)
+    wanted.want("c", Unset)
+
+    d.enter_map()
+
+    assert(!failed_unit(d.get_items_checking(wanted, &refuse_unknown)),
+           "every entry was asked for, so nothing was left to refuse")
+
+// Ask for one of three, and the other two are unknown fields the callback rejects.
+@test
+a_callback_that_refuses_stops_the_traversal() =
+    var d = decoder(sample(), Normal)
+    var wanted = item_list(d)
+
+    wanted.want("a", Int)
+
+    d.enter_map()
+
+    assert(failed_unit(d.get_items_checking(wanted, &refuse_unknown)),
+           "b and c were not asked for, and the callback refuses them")
+
+// A list holds a bounded number of labels, and asking for one too many is refused rather than
+// silently dropped.
+@test
+an_item_list_refuses_more_labels_than_it_holds() =
+    var d = decoder(sample(), Normal)
+    var wanted = item_list(d)
+
+    var i: usize = 0
+
+    while i < items_capacity()
+        wanted.want_at(long(i), Unset)
+        i = i + 1
+
+    wanted.want_at(999, Unset) match
+        Ok(_) -> assert(false, "one past the capacity should be refused")
+        Err(_) -> assert(true, "refused")

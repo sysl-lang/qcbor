@@ -1482,13 +1482,22 @@ struct Decoder
     get_items(self, list: ItemList) -> Result[unit, Error] =
         unit_result(c_items_run(self.handle, list.handle))
 
-    // The same, with `check` consulted for each item as it is found -- validating during the one
-    // traversal rather than after it.
+    // The same, with `check` consulted for **the entries the list did not ask for**.
+    //
+    // That is QCBOR's rule and not the obvious reading, so it is worth stating plainly: the callback
+    // is *not* a validator for the values being fetched -- those are checked against the type each
+    // `want` named. It fires on everything **else** in the map, which makes it the way to say what
+    // to do about a field the schema does not know: ignore it, count it, or refuse the message. A
+    // protocol that must reject unknown fields has nowhere else to do it in one pass.
+    //
+    // Measured rather than assumed. A first version of `a_callback_that_refuses_stops_the_traversal`
+    // asked for the same label it then refused and passed for the wrong reason, because the callback
+    // never ran: `qcbor_decode.c` guards the call with `if(!bMatched && pCallBack != NULL)`.
     //
     // **`check` is a C function pointer**, which is what QCBOR takes and what `12 §6a` spells
-    // `*extern`. It is handed this decoder as its first argument and the found item as its second;
-    // `stage` turns the second into an `Item`. Answering anything but `callback_ok()` stops the
-    // traversal with that error.
+    // `*extern`. It is handed this decoder as its first argument and the unmatched item as its
+    // second; `staged` turns those two into an `Item`. Answering anything but `callback_ok()` stops
+    // the traversal with that error.
     get_items_checking(self, list: ItemList,
                        check: *extern(*u8, *u8) -> int) -> Result[unit, Error] =
         unit_result(c_items_run_cb(self.handle, list.handle, ptr_cast(self.handle), check))
