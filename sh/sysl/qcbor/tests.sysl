@@ -1,6 +1,6 @@
 module sh.sysl.qcbor
 
-import sysl.text.str_builder_with_capacity
+import sysl.text.{str_builder_with_capacity, from_utf8}
 
 // The binding's own tests, run by `sysl test .`.
 //
@@ -884,3 +884,137 @@ peek_does_not_consume() =
     d.next() match
         Err(why) -> assert(false, why.message())
         Ok(item) -> assert(is_int(item, 1), "and it is still there")
+
+// ==================================================================================================
+// Spiffy decode — entering a map and asking for values by label
+// ==================================================================================================
+
+private text_of(r: Result[[]const u8, Error], fallback: string) -> string =
+    r match
+        Err(_) -> fallback
+        Ok(b) ->
+            from_utf8(b) match
+                Err(_) -> fallback
+                Ok(s) -> s
+
+private int_of(r: Result[long, Error], fallback: long) -> long =
+    r match
+        Err(_) -> fallback
+        Ok(v) -> v
+
+private double_of(r: Result[real, Error], fallback: real) -> real =
+    r match
+        Err(_) -> fallback
+        Ok(v) -> v
+
+private failed(r: Result[long, Error]) -> bool =
+    r match
+        Err(_) -> true
+        Ok(_) -> false
+
+private why(r: Result[long, Error]) -> ErrorKind =
+    r match
+        Err(e) -> e.kind()
+        Ok(_) -> Success
+
+// {"a": 1, "b": "IETF", "c": true}
+private sample() -> []u8 = unhex("a361610161626449455446616363f5")
+
+@test
+reads_a_map_by_label() =
+    var d = decoder(sample(), Normal)
+
+    d.enter_map()
+
+    assert(int_of(d.get_int_in_map("a"), -1) == 1, "a is 1")
+    assert(text_of(d.get_text_bytes_in_map("b"), "") == "IETF", "b is IETF")
+
+    d.get_bool_in_map("c") match
+        Err(e) -> assert(false, e.message())
+        Ok(v) -> assert(v, "c is true")
+
+    d.exit_map()
+
+    assert(finished(d), "and the map was the whole input")
+
+// **Order does not matter**, which is the point of searching by label rather than walking in order.
+@test
+labels_may_be_asked_for_in_any_order() =
+    var d = decoder(sample(), Normal)
+
+    d.enter_map()
+
+    assert(text_of(d.get_text_bytes_in_map("b"), "") == "IETF", "b first")
+    assert(int_of(d.get_int_in_map("a"), -1) == 1, "then a")
+
+    d.exit_map()
+
+// A label the map does not hold is `LabelNotFound`, and it is recoverable -- the decoder can be
+// asked for something else afterwards.
+@test
+a_missing_label_is_recoverable() =
+    var d = decoder(sample(), Normal)
+
+    d.enter_map()
+
+    val missing = d.get_int_in_map("nope")
+
+    assert(failed(missing), "there is no such label")
+    assert(why(missing) == LabelNotFound, "and it says so")
+
+    d.take_error()
+
+    assert(int_of(d.get_int_in_map("a"), -1) == 1, "and the decoder carries on")
+
+// Asking for the wrong type is a different failure from asking for a label that is not there.
+@test
+the_wrong_type_is_its_own_failure() =
+    var d = decoder(sample(), Normal)
+
+    d.enter_map()
+
+    val wrong = d.get_int_in_map("b")
+
+    assert(why(wrong) == UnexpectedType, "b is text, not an integer")
+
+// Integer labels, which is what a compact protocol uses.
+@test
+reads_a_map_by_integer_label() =
+    // {1: 2, 3: 4}
+    var d = decoder(unhex("a201020304"), Normal)
+
+    d.enter_map()
+
+    assert(int_of(d.get_int_in_map_at(3), -1) == 4, "label 3 holds 4")
+    assert(int_of(d.get_int_in_map_at(1), -1) == 2, "label 1 holds 2")
+
+    d.exit_map()
+
+@test
+enters_and_leaves_a_nested_map() =
+    // {"outer": {"inner": 7}}
+    var d = decoder(unhex("a1656f75746572a165696e6e657207"), Normal)
+
+    d.enter_map()
+    d.enter_map_in_map("outer")
+
+    assert(int_of(d.get_int_in_map("inner"), -1) == 7, "the nested value")
+
+    d.exit_map()
+    d.exit_map()
+
+    assert(finished(d), "both levels closed")
+
+@test
+enters_an_array_and_reads_it_in_order() =
+    // {"xs": [20, 10]}
+    var d = decoder(unhex("a162787382140a"), Normal)
+
+    d.enter_map()
+    d.enter_array_in_map("xs")
+
+    assert(int_of(d.get_int(), -1) == 20, "the first element")
+    assert(int_of(d.get_int(), -1) == 10, "the second element")
+
+    d.exit_array()
+    d.exit_map()

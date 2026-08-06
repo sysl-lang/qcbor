@@ -989,3 +989,782 @@ int sysl_qcbor_decode_set_mem_pool(SyslDecoder *d, uint8_t *pool, size_t pool_le
 
 /* The smallest pool QCBOR will accept, which is its own bookkeeping overhead. */
 size_t sysl_qcbor_mem_pool_overhead(void) { return QCBOR_DECODE_MIN_MEM_POOL_SIZE; }
+
+/* ===================================================================== *
+ * Spiffy decode
+ *
+ * QCBOR's second decoding interface: enter a map or an array and then ask for
+ * values by label, instead of walking every item in order and matching on what
+ * turns up. It is what makes reading a known schema short.
+ *
+ * ==One shim per type, not three==
+ *
+ * Every getter comes in three spellings -- the bare one, `...InMapN` for an
+ * integer label and `...InMapSZ` for a text one -- and unlike the encoder's
+ * label forms these are genuinely different functions: the map ones *search*
+ * the bounded map rather than writing a label first. So the three cannot
+ * collapse into composition the way the encoding side's did.
+ *
+ * What they can collapse into is one function taking a label discriminator,
+ * which is what the macros below generate. Three declarations become one, the
+ * sysl side still sees three named methods, and the dispatch is written once
+ * instead of thirty times. Thirty copies of a five-line switch is not more
+ * readable than the switch plus a name -- and a copy is a place for one of them
+ * to differ by accident.
+ *
+ * ==A label crosses as bytes and a length, and is terminated here==
+ *
+ * QCBOR's by-name search takes a NUL-terminated `const char *`, and a sysl
+ * `string` is not NUL-terminated. `sysl.text.cstring` makes one that is -- but
+ * it is a **value that owns its copy**, so `cstring(label).ptr` written at a
+ * call site hands over a pointer whose storage is released at the end of that
+ * expression, before QCBOR ever reads it. That was measured rather than
+ * reasoned about: with the pointer built on the sysl side every integer-label
+ * test passed and every text-label test failed.
+ *
+ * Terminating here removes the rule instead of documenting it. The copy lives
+ * for the call, which is exactly as long as QCBOR needs it: the search reads the
+ * label and keeps nothing.
+ *
+ * ==Errors are sticky, and that is the design==
+ *
+ * A spiffy getter returns nothing and records its failure in the context, so a
+ * run of them can be written without a check between each. Every one of them is
+ * a no-op once an error is set, which is what makes that safe. The shims here
+ * return the current error anyway, so the sysl side can offer a `Result` per
+ * call; because the error is sticky, the first real failure is what every later
+ * call reports.
+ * ===================================================================== */
+
+#define LABEL_NONE 0
+#define LABEL_INT  1
+#define LABEL_TEXT 2
+
+#define QCBOR_LABEL_MAX 256
+
+/* Copies `n` bytes of `p` into `out` and terminates it. Answers non-zero when
+ * the label is too long, which is refused rather than truncated: a truncated
+ * label would search for something the caller did not ask for and then answer
+ * "not found", which is a wrong answer wearing a plausible one's clothes.
+ */
+static int label_of(const uint8_t *p, size_t n, char *out) {
+    if (n >= QCBOR_LABEL_MAX) {
+        return 1;
+    }
+
+    if (n != 0 && p != NULL) {
+        memcpy(out, p, n);
+    }
+
+    out[n] = '\0';
+
+    return 0;
+}
+
+#define LABEL_PROLOGUE                                                     \
+    char sz[QCBOR_LABEL_MAX];                                              \
+    if (label_of(lp, ll, sz)) { return (int)QCBOR_ERR_STRING_TOO_LONG; }
+
+/* A plain getter: one out-parameter, no tag requirement, no conversions. */
+#define SPIFFY_GET(NAME, QNAME, TYPE)                                           \
+    int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,  \
+             TYPE *out) {                                                       \
+        LABEL_PROLOGUE                                                          \
+        switch (lk) {                                                           \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, out);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, out); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, out);              break; \
+        }                                                                       \
+        return (int)QCBORDecode_GetError(&d->ctx);                              \
+    }
+
+/* A getter whose result is a string, split into a pointer and a length. The
+ * pointer is into the input buffer, as everywhere else in this binding.
+ */
+#define SPIFFY_GET_STR(NAME, QNAME)                                             \
+    int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,  \
+             const uint8_t **p, size_t *n) {                                    \
+        UsefulBufC s = NULLUsefulBufC;                                          \
+        LABEL_PROLOGUE                                                          \
+        switch (lk) {                                                           \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, &s);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, &s); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, &s);              break; \
+        }                                                                       \
+        *p = (const uint8_t *)s.ptr;                                            \
+        *n = s.len;                                                             \
+        return (int)QCBORDecode_GetError(&d->ctx);                              \
+    }
+
+/* A tagged getter whose result is a string: the tag requirement chooses whether
+ * the tag number must be there, must not be, or may be.
+ */
+#define SPIFFY_GET_TAGGED_STR(NAME, QNAME)                                          \
+    int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,      \
+             uint8_t req, const uint8_t **p, size_t *n) {                           \
+        UsefulBufC s = NULLUsefulBufC;                                              \
+        LABEL_PROLOGUE                                                              \
+        switch (lk) {                                                               \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, req, &s);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, req, &s); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, req, &s);              break; \
+        }                                                                           \
+        *p = (const uint8_t *)s.ptr;                                                \
+        *n = s.len;                                                                 \
+        return (int)QCBORDecode_GetError(&d->ctx);                                  \
+    }
+
+/* A tagged getter with a scalar result -- the two epoch forms. */
+#define SPIFFY_GET_TAGGED(NAME, QNAME, TYPE)                                        \
+    int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,      \
+             uint8_t req, TYPE *out) {                                              \
+        LABEL_PROLOGUE                                                              \
+        switch (lk) {                                                               \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, req, out);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, req, out); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, req, out);              break; \
+        }                                                                           \
+        return (int)QCBORDecode_GetError(&d->ctx);                                  \
+    }
+
+/* A converting getter, whose bitmask says which CBOR types it will accept and
+ * turn into the result type.
+ */
+#define SPIFFY_GET_CONVERT(NAME, QNAME, TYPE)                                        \
+    int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,       \
+             uint32_t types, TYPE *out) {                                            \
+        LABEL_PROLOGUE                                                               \
+        switch (lk) {                                                                \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, types, out);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, types, out); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, types, out);              break; \
+        }                                                                            \
+        return (int)QCBORDecode_GetError(&d->ctx);                                   \
+    }
+
+/* -- The plain getters ---------------------------------------------------- */
+
+SPIFFY_GET(sysl_qcbor_get_int64,  GetInt64,  int64_t)
+SPIFFY_GET(sysl_qcbor_get_uint64, GetUInt64, uint64_t)
+SPIFFY_GET(sysl_qcbor_get_double, GetDouble, double)
+SPIFFY_GET(sysl_qcbor_get_simple, GetSimple, uint8_t)
+
+SPIFFY_GET_STR(sysl_qcbor_get_bytes, GetByteString)
+SPIFFY_GET_STR(sysl_qcbor_get_text,  GetTextString)
+
+/* `bool` is C's, whose size a sysl `extern` should not have to know, so it
+ * crosses as an int.
+ */
+int sysl_qcbor_get_bool(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
+                        int *out) {
+    bool b = false;
+
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:  QCBORDecode_GetBoolInMapN(&d->ctx, ln, &b);  break;
+        case LABEL_TEXT: QCBORDecode_GetBoolInMapSZ(&d->ctx, sz, &b); break;
+        default:         QCBORDecode_GetBool(&d->ctx, &b);            break;
+    }
+
+    *out = b ? 1 : 0;
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* Null and undefined carry no value: what is being asked is "is the next item
+ * this, and step over it if so".
+ */
+int sysl_qcbor_get_null(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll) {
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:  QCBORDecode_GetNullInMapN(&d->ctx, ln);  break;
+        case LABEL_TEXT: QCBORDecode_GetNullInMapSZ(&d->ctx, sz); break;
+        default:         QCBORDecode_GetNull(&d->ctx);            break;
+    }
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_get_undefined(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll) {
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:  QCBORDecode_GetUndefinedInMapN(&d->ctx, ln);  break;
+        case LABEL_TEXT: QCBORDecode_GetUndefinedInMapSZ(&d->ctx, sz); break;
+        default:         QCBORDecode_GetUndefined(&d->ctx);            break;
+    }
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* -- The converting getters ------------------------------------------------ *
+ *
+ * `Convert` accepts the types that need no arithmetic; `ConvertAll` adds the
+ * ones that do -- a decimal fraction or a big float has to be evaluated, which
+ * is where `pow` and `exp2` come in and why `qcbor.sysl` names the mathematics.
+ */
+
+SPIFFY_GET_CONVERT(sysl_qcbor_get_int64_convert,      GetInt64Convert,     int64_t)
+SPIFFY_GET_CONVERT(sysl_qcbor_get_int64_convert_all,  GetInt64ConvertAll,  int64_t)
+SPIFFY_GET_CONVERT(sysl_qcbor_get_uint64_convert,     GetUInt64Convert,    uint64_t)
+SPIFFY_GET_CONVERT(sysl_qcbor_get_uint64_convert_all, GetUInt64ConvertAll, uint64_t)
+SPIFFY_GET_CONVERT(sysl_qcbor_get_double_convert,     GetDoubleConvert,    double)
+SPIFFY_GET_CONVERT(sysl_qcbor_get_double_convert_all, GetDoubleConvertAll, double)
+
+/* The conversion-type bits, which are macros and so have to be read here. */
+uint32_t sysl_qcbor_convert_xint64(void)           { return QCBOR_CONVERT_TYPE_XINT64; }
+uint32_t sysl_qcbor_convert_float(void)            { return QCBOR_CONVERT_TYPE_FLOAT; }
+uint32_t sysl_qcbor_convert_big_num(void)          { return QCBOR_CONVERT_TYPE_BIG_NUM; }
+uint32_t sysl_qcbor_convert_decimal_fraction(void) { return QCBOR_CONVERT_TYPE_DECIMAL_FRACTION; }
+uint32_t sysl_qcbor_convert_bigfloat(void)         { return QCBOR_CONVERT_TYPE_BIGFLOAT; }
+
+/* The tag requirement a spiffy getter takes, from the sysl enum's ordinal.
+ *
+ * QCBOR's three requirements are a small integer and "additional tags are
+ * allowed" is a bit OR'd on top, so the six combinations are six values here
+ * rather than a second parameter carried through eighty declarations.
+ */
+uint8_t sysl_qcbor_tag_requirement(int ordinal) {
+    switch (ordinal) {
+        case 0: return QCBOR_TAG_REQUIREMENT_TAG;
+        case 1: return QCBOR_TAG_REQUIREMENT_NOT_A_TAG;
+        case 2: return QCBOR_TAG_REQUIREMENT_OPTIONAL_TAG;
+        case 3: return (uint8_t)(QCBOR_TAG_REQUIREMENT_TAG |
+                                 QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS);
+        case 4: return (uint8_t)(QCBOR_TAG_REQUIREMENT_NOT_A_TAG |
+                                 QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS);
+        default: return (uint8_t)(QCBOR_TAG_REQUIREMENT_OPTIONAL_TAG |
+                                  QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS);
+    }
+}
+
+/* -- The tagged getters ---------------------------------------------------- */
+
+SPIFFY_GET_TAGGED(sysl_qcbor_get_epoch_date, GetEpochDate, int64_t)
+SPIFFY_GET_TAGGED(sysl_qcbor_get_epoch_days, GetEpochDays, int64_t)
+
+SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_date_string, GetDateString)
+SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_days_string, GetDaysString)
+SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_uri,         GetURI)
+SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_b64,         GetB64)
+SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_b64url,      GetB64URL)
+SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_regex,       GetRegex)
+SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_binary_uuid, GetBinaryUUID)
+
+/* The seven above behind one entry point, chosen by `which`.
+ *
+ * They take the same arguments and answer the same shape, so the sysl side has
+ * one private dispatcher rather than seven bodies differing in a name, and the
+ * choice is made here where a switch is the natural thing to write.
+ */
+int sysl_qcbor_get_tagged_str(SyslDecoder *d, int which, int lk, int64_t ln,
+                              const uint8_t *lp, size_t ll, uint8_t req,
+                              const uint8_t **p, size_t *n) {
+    switch (which) {
+        case 0:  return sysl_qcbor_get_date_string(d, lk, ln, lp, ll, req, p, n);
+        case 1:  return sysl_qcbor_get_days_string(d, lk, ln, lp, ll, req, p, n);
+        case 2:  return sysl_qcbor_get_uri(d, lk, ln, lp, ll, req, p, n);
+        case 3:  return sysl_qcbor_get_b64(d, lk, ln, lp, ll, req, p, n);
+        case 4:  return sysl_qcbor_get_b64url(d, lk, ln, lp, ll, req, p, n);
+        case 5:  return sysl_qcbor_get_regex(d, lk, ln, lp, ll, req, p, n);
+        default: return sysl_qcbor_get_binary_uuid(d, lk, ln, lp, ll, req, p, n);
+    }
+}
+
+/* A bignum, whose sign is which tag it carried rather than part of its bytes. */
+int sysl_qcbor_get_bignum(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
+                          uint8_t req, const uint8_t **p, size_t *n, int *negative) {
+    UsefulBufC s   = NULLUsefulBufC;
+    bool       neg = false;
+
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:  QCBORDecode_GetBignumInMapN(&d->ctx, ln, req, &s, &neg);  break;
+        case LABEL_TEXT: QCBORDecode_GetBignumInMapSZ(&d->ctx, sz, req, &s, &neg); break;
+        default:         QCBORDecode_GetBignum(&d->ctx, req, &s, &neg);            break;
+    }
+
+    *p        = (const uint8_t *)s.ptr;
+    *n        = s.len;
+    *negative = neg ? 1 : 0;
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* A MIME message, which may have arrived under tag 36 or tag 257; the second is
+ * binary rather than text, and a caller that will read the body needs to know
+ * which it got.
+ */
+int sysl_qcbor_get_mime(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
+                        uint8_t req, const uint8_t **p, size_t *n, int *is_binary) {
+    UsefulBufC s      = NULLUsefulBufC;
+    bool       binary = false;
+
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:
+            QCBORDecode_GetMIMEMessageInMapN(&d->ctx, ln, req, &s, &binary);
+            break;
+        case LABEL_TEXT:
+            QCBORDecode_GetMIMEMessageInMapSZ(&d->ctx, sz, req, &s, &binary);
+            break;
+        default:
+            QCBORDecode_GetMIMEMessage(&d->ctx, req, &s, &binary);
+            break;
+    }
+
+    *p         = (const uint8_t *)s.ptr;
+    *n         = s.len;
+    *is_binary = binary ? 1 : 0;
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* -- Decimal fractions and big floats -------------------------------------- *
+ *
+ * Two out-parameters rather than one, so these four are written out rather than
+ * generated: the value is a mantissa *and* an exponent.
+ */
+
+int sysl_qcbor_get_decimal_fraction(SyslDecoder *d, int lk, int64_t ln,
+                                    const uint8_t *lp, size_t ll, uint8_t req,
+                                    int64_t *mantissa, int64_t *exponent) {
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:
+            QCBORDecode_GetDecimalFractionInMapN(&d->ctx, ln, req, mantissa, exponent);
+            break;
+        case LABEL_TEXT:
+            QCBORDecode_GetDecimalFractionInMapSZ(&d->ctx, sz, req, mantissa, exponent);
+            break;
+        default:
+            QCBORDecode_GetDecimalFraction(&d->ctx, req, mantissa, exponent);
+            break;
+    }
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_get_big_float(SyslDecoder *d, int lk, int64_t ln,
+                             const uint8_t *lp, size_t ll, uint8_t req,
+                             int64_t *mantissa, int64_t *exponent) {
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:
+            QCBORDecode_GetBigFloatInMapN(&d->ctx, ln, req, mantissa, exponent);
+            break;
+        case LABEL_TEXT:
+            QCBORDecode_GetBigFloatInMapSZ(&d->ctx, sz, req, mantissa, exponent);
+            break;
+        default:
+            QCBORDecode_GetBigFloat(&d->ctx, req, mantissa, exponent);
+            break;
+    }
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* The `Big` forms, whose mantissa may be wider than an int64.
+ *
+ * **These need a scratch buffer from the caller**, and that is not an oversight
+ * of the API: a bignum mantissa read out of a negative tag has to be
+ * sign-converted, which produces bytes that are not in the input, so they need
+ * somewhere to go. The result may point into the input *or* into the scratch,
+ * which is why the sysl side hands back a slice rather than an offset.
+ */
+int sysl_qcbor_get_decimal_fraction_big(SyslDecoder *d, int lk, int64_t ln,
+                                        const uint8_t *lp, size_t ll, uint8_t req,
+                                        uint8_t *scratch, size_t scratch_len,
+                                        const uint8_t **p, size_t *n, int *negative,
+                                        int64_t *exponent) {
+    UsefulBuf  buf;
+    UsefulBufC s   = NULLUsefulBufC;
+    bool       neg = false;
+
+    LABEL_PROLOGUE
+
+    buf.ptr = scratch;
+    buf.len = scratch_len;
+
+    switch (lk) {
+        case LABEL_INT:
+            QCBORDecode_GetDecimalFractionBigInMapN(&d->ctx, ln, req, buf, &s, &neg, exponent);
+            break;
+        case LABEL_TEXT:
+            QCBORDecode_GetDecimalFractionBigInMapSZ(&d->ctx, sz, req, buf, &s, &neg, exponent);
+            break;
+        default:
+            QCBORDecode_GetDecimalFractionBig(&d->ctx, req, buf, &s, &neg, exponent);
+            break;
+    }
+
+    *p        = (const uint8_t *)s.ptr;
+    *n        = s.len;
+    *negative = neg ? 1 : 0;
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_get_big_float_big(SyslDecoder *d, int lk, int64_t ln,
+                                 const uint8_t *lp, size_t ll, uint8_t req,
+                                 uint8_t *scratch, size_t scratch_len,
+                                 const uint8_t **p, size_t *n, int *negative,
+                                 int64_t *exponent) {
+    UsefulBuf  buf;
+    UsefulBufC s   = NULLUsefulBufC;
+    bool       neg = false;
+
+    LABEL_PROLOGUE
+
+    buf.ptr = scratch;
+    buf.len = scratch_len;
+
+    switch (lk) {
+        case LABEL_INT:
+            QCBORDecode_GetBigFloatBigInMapN(&d->ctx, ln, req, buf, &s, &neg, exponent);
+            break;
+        case LABEL_TEXT:
+            QCBORDecode_GetBigFloatBigInMapSZ(&d->ctx, sz, req, buf, &s, &neg, exponent);
+            break;
+        default:
+            QCBORDecode_GetBigFloatBig(&d->ctx, req, buf, &s, &neg, exponent);
+            break;
+    }
+
+    *p        = (const uint8_t *)s.ptr;
+    *n        = s.len;
+    *negative = neg ? 1 : 0;
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* -- Bounded mode: entering and leaving ------------------------------------ *
+ *
+ * Entering a map or an array bounds the traversal to it, which is what lets the
+ * getters above search by label and what makes `rewind` mean "back to the start
+ * of this one". The entered item lands in the wrapper's slot, so its count and
+ * label are readable through the ordinary accessors.
+ */
+
+int sysl_qcbor_enter_map(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll) {
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:  QCBORDecode_EnterMapFromMapN(&d->ctx, ln);  break;
+        case LABEL_TEXT: QCBORDecode_EnterMapFromMapSZ(&d->ctx, sz); break;
+        default:         QCBORDecode_EnterMap(&d->ctx, &d->item);    break;
+    }
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_enter_array(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll) {
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:  QCBORDecode_EnterArrayFromMapN(&d->ctx, ln);  break;
+        case LABEL_TEXT: QCBORDecode_EnterArrayFromMapSZ(&d->ctx, sz); break;
+        default:         QCBORDecode_EnterArray(&d->ctx, &d->item);    break;
+    }
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_exit_map(SyslDecoder *d) {
+    QCBORDecode_ExitMap(&d->ctx);
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_exit_array(SyslDecoder *d) {
+    QCBORDecode_ExitArray(&d->ctx);
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* A whole map or array as the bytes that encode it, without decoding inside --
+ * for forwarding a subtree, or hashing the exact bytes a signature covers.
+ */
+int sysl_qcbor_get_map_bytes(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
+                             const uint8_t **p, size_t *n) {
+    UsefulBufC s = NULLUsefulBufC;
+
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:  QCBORDecode_GetMapFromMapN(&d->ctx, ln, &d->item, &s);  break;
+        case LABEL_TEXT: QCBORDecode_GetMapFromMapSZ(&d->ctx, sz, &d->item, &s); break;
+        default:         QCBORDecode_GetMap(&d->ctx, &d->item, &s);              break;
+    }
+
+    *p = (const uint8_t *)s.ptr;
+    *n = s.len;
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_get_array_bytes(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
+                               const uint8_t **p, size_t *n) {
+    UsefulBufC s = NULLUsefulBufC;
+
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:  QCBORDecode_GetArrayFromMapN(&d->ctx, ln, &d->item, &s);  break;
+        case LABEL_TEXT: QCBORDecode_GetArrayFromMapSZ(&d->ctx, sz, &d->item, &s); break;
+        default:         QCBORDecode_GetArray(&d->ctx, &d->item, &s);              break;
+    }
+
+    *p = (const uint8_t *)s.ptr;
+    *n = s.len;
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* A byte string whose content is itself CBOR, entered as if it were the input --
+ * the decoding half of the encoder's `bstr_wrap`, and how COSE reads a payload.
+ */
+int sysl_qcbor_enter_bstr_wrapped(SyslDecoder *d, int lk, int64_t ln,
+                                  const uint8_t *lp, size_t ll, uint8_t req,
+                                  const uint8_t **p, size_t *n) {
+    UsefulBufC s = NULLUsefulBufC;
+
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:
+            QCBORDecode_EnterBstrWrappedFromMapN(&d->ctx, ln, req, &s);
+            break;
+        case LABEL_TEXT:
+            QCBORDecode_EnterBstrWrappedFromMapSZ(&d->ctx, sz, req, &s);
+            break;
+        default:
+            QCBORDecode_EnterBstrWrapped(&d->ctx, req, &s);
+            break;
+    }
+
+    *p = (const uint8_t *)s.ptr;
+    *n = s.len;
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+int sysl_qcbor_exit_bstr_wrapped(SyslDecoder *d) {
+    QCBORDecode_ExitBstrWrapped(&d->ctx);
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* One item by label, with no type expected -- the general form the typed
+ * getters above are specializations of.
+ */
+int sysl_qcbor_get_item_in_map(SyslDecoder *d, int lk, int64_t ln,
+                               const uint8_t *lp, size_t ll) {
+    LABEL_PROLOGUE
+
+    switch (lk) {
+        case LABEL_INT:
+            QCBORDecode_GetItemInMapN(&d->ctx, ln, QCBOR_TYPE_ANY, &d->item);
+            break;
+        case LABEL_TEXT:
+            QCBORDecode_GetItemInMapSZ(&d->ctx, sz, QCBOR_TYPE_ANY, &d->item);
+            break;
+        default:
+            return (int)QCBOR_ERR_MAP_NOT_ENTERED;
+    }
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* ===================================================================== *
+ * Fetching several labels in one pass
+ *
+ * `QCBORDecode_GetItemsInMap` takes a list of QCBORItems whose labels the
+ * caller has filled in, and finds them all in a single traversal instead of one
+ * per label. For a map read by a schema that is the difference between one pass
+ * and a dozen.
+ *
+ * ==The list is its own storage, not part of the decoder==
+ *
+ * It could have lived in the decoder's wrapper, and then every decoder would
+ * carry a kilobyte it mostly does not use -- the wrong trade for a format whose
+ * reason to exist is constrained devices. So it is a second thing the caller
+ * sizes, exactly as the decoder itself is, and a program that never batches
+ * never pays.
+ *
+ * ==The labels are copied here, and for a second reason==
+ *
+ * QCBOR reads the label strings during the call, so they have to be alive then;
+ * and unlike the getters above, these have to survive from the `want` that
+ * added them until the `run` that uses them. Nothing on the sysl side would
+ * keep a temporary alive across two calls, so the text goes into the list's own
+ * pool. A label too long for what is left is refused rather than truncated.
+ * ===================================================================== */
+
+/* Chosen rather than derived: QCBOR has no limit of its own here, and a list is
+ * the labels of one map read by one schema. Sixteen is past what that is in
+ * practice, and the cost of being wrong is a clean refusal.
+ */
+#define SYSL_ITEMS_MAX  16
+#define SYSL_LABEL_POOL 512
+
+typedef struct {
+    /* One more than the maximum, because the list is terminated by an entry of
+     * type QCBOR_TYPE_NONE and that entry has to fit.
+     */
+    QCBORItem items[SYSL_ITEMS_MAX + 1];
+    char      pool[SYSL_LABEL_POOL];
+    size_t    used;
+    size_t    count;
+} SyslItemList;
+
+size_t sysl_qcbor_items_words(void) {
+    return (sizeof(SyslItemList) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+}
+
+size_t sysl_qcbor_items_capacity(void) { return SYSL_ITEMS_MAX; }
+
+SyslItemList *sysl_qcbor_items_init(uint64_t *storage, size_t words) {
+    SyslItemList *l;
+
+    if (words * sizeof(uint64_t) < sizeof(SyslItemList)) {
+        return NULL;
+    }
+
+    l = (SyslItemList *)storage;
+
+    memset(l, 0, sizeof(*l));
+
+    return l;
+}
+
+/* The QCBOR type a sysl `ItemKind` ordinal asks for, or QCBOR_TYPE_ANY where
+ * the caller will inspect the kind themselves.
+ */
+static uint8_t qcbor_type_of(int kind) {
+    switch (kind) {
+        case KIND_INT:         return QCBOR_TYPE_INT64;
+        case KIND_UINT:        return QCBOR_TYPE_UINT64;
+        case KIND_ARRAY:       return QCBOR_TYPE_ARRAY;
+        case KIND_MAP:         return QCBOR_TYPE_MAP;
+        case KIND_BYTE_STRING: return QCBOR_TYPE_BYTE_STRING;
+        case KIND_TEXT_STRING: return QCBOR_TYPE_TEXT_STRING;
+        case KIND_FALSE:       return QCBOR_TYPE_FALSE;
+        case KIND_TRUE:        return QCBOR_TYPE_TRUE;
+        case KIND_NULL:        return QCBOR_TYPE_NULL;
+        case KIND_UNDEF:       return QCBOR_TYPE_UNDEF;
+        case KIND_DOUBLE:      return QCBOR_TYPE_DOUBLE;
+        case KIND_DATE_EPOCH:  return QCBOR_TYPE_DATE_EPOCH;
+        default:               return QCBOR_TYPE_ANY;
+    }
+}
+
+/* Ask for one more label. Answers 0 on success, 1 when the list is full, and
+ * 2 when the label pool is.
+ */
+int sysl_qcbor_items_want_at(SyslItemList *l, int64_t label, int kind) {
+    if (l->count >= SYSL_ITEMS_MAX) {
+        return 1;
+    }
+
+    memset(&l->items[l->count], 0, sizeof(QCBORItem));
+
+    l->items[l->count].uLabelType  = QCBOR_TYPE_INT64;
+    l->items[l->count].label.int64 = label;
+    l->items[l->count].uDataType   = qcbor_type_of(kind);
+
+    l->count++;
+
+    return 0;
+}
+
+int sysl_qcbor_items_want(SyslItemList *l, const uint8_t *label, size_t label_len, int kind) {
+    char *slot;
+
+    if (l->count >= SYSL_ITEMS_MAX) {
+        return 1;
+    }
+
+    /* One more for the terminator: QCBOR takes these as NUL-terminated strings. */
+    if (l->used + label_len + 1 > SYSL_LABEL_POOL) {
+        return 2;
+    }
+
+    slot = &l->pool[l->used];
+
+    if (label_len != 0 && label != NULL) {
+        memcpy(slot, label, label_len);
+    }
+
+    slot[label_len] = '\0';
+
+    l->used += label_len + 1;
+
+    memset(&l->items[l->count], 0, sizeof(QCBORItem));
+
+    l->items[l->count].uLabelType        = QCBOR_TYPE_TEXT_STRING;
+    l->items[l->count].label.string.ptr  = slot;
+    l->items[l->count].label.string.len  = label_len;
+    l->items[l->count].uDataType         = qcbor_type_of(kind);
+
+    l->count++;
+
+    return 0;
+}
+
+/* Find them all in one pass over the entered map. */
+int sysl_qcbor_items_run(SyslDecoder *d, SyslItemList *l) {
+    memset(&l->items[l->count], 0, sizeof(QCBORItem));
+    l->items[l->count].uLabelType = QCBOR_TYPE_NONE;
+
+    QCBORDecode_GetItemsInMap(&d->ctx, l->items);
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* The same, with a callback consulted for each item as it is found -- for
+ * validating against a schema during the one traversal rather than after it.
+ *
+ * The callback is a C function pointer, which sysl spells `*extern(...)` and
+ * takes the address of with `&f` (`12 § 6a`). QCBOR passes it the context
+ * pointer it was given and the item it found; a callback answering anything but
+ * QCBOR_SUCCESS stops the traversal with that error.
+ */
+int sysl_qcbor_items_run_with_callback(SyslDecoder *d, SyslItemList *l, void *cb_ctx,
+                                       QCBORItemCallback cb) {
+    memset(&l->items[l->count], 0, sizeof(QCBORItem));
+    l->items[l->count].uLabelType = QCBOR_TYPE_NONE;
+
+    QCBORDecode_GetItemsInMapWithCallback(&d->ctx, l->items, cb_ctx, cb);
+
+    return (int)QCBORDecode_GetError(&d->ctx);
+}
+
+/* Move the nth result into the decoder's item slot, so that every accessor
+ * already written reads it. That is the whole reason the slot exists as a place
+ * rather than as a return value: one reader serves the traversal and the batch.
+ */
+int sysl_qcbor_items_select(SyslDecoder *d, const SyslItemList *l, size_t index) {
+    if (index >= l->count) {
+        return 0;
+    }
+
+    d->item = l->items[index];
+
+    return 1;
+}
+
+/* Stage an item a callback was handed, for the same reason. */
+void sysl_qcbor_item_stage(SyslDecoder *d, const QCBORItem *item) {
+    d->item = *item;
+}
+
+/* What a callback returns to accept an item, and to refuse one. */
+int sysl_qcbor_callback_ok(void)   { return (int)QCBOR_SUCCESS; }
+int sysl_qcbor_callback_fail(void) { return (int)QCBOR_ERR_CALLBACK_FAIL; }
