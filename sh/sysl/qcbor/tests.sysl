@@ -1307,3 +1307,237 @@ an_item_list_refuses_more_labels_than_it_holds() =
     wanted.want_at(999, Unset) match
         Ok(_) -> assert(false, "one past the capacity should be refused")
         Err(_) -> assert(true, "refused")
+
+// ==================================================================================================
+// Decode modes
+// ==================================================================================================
+
+// **`MapStringsOnly` turns a class of malformed input into one refusal.** A protocol that has said
+// its maps are string-keyed gets `MapLabelType` for anything else, instead of a label it then has to
+// check.
+@test
+strings_only_mode_refuses_an_integer_label() =
+    // {1: 2}
+    var strict = decoder(unhex("a10102"), MapStringsOnly)
+    var lenient = decoder(unhex("a10102"), Normal)
+
+    strict.next()
+
+    assert(failed_next(strict.next()), "an integer label is refused")
+    assert(!failed_next(lenient.next()), "and accepted in the ordinary mode")
+
+// **`MapsAsArrays` is how a map with non-scalar labels is read at all**, and how duplicate labels
+// stay visible rather than being merged. Entries arrive as elements: label, value, label, value.
+@test
+maps_as_arrays_mode_flattens_a_map() =
+    // {"a": 1}
+    var d = decoder(unhex("a1616101"), MapsAsArrays)
+
+    d.next() match
+        Err(e) -> assert(false, e.message())
+        Ok(head) ->
+            assert(head.kind() == MapAsArray, "the map arrives as an array")
+            assert(is_count(head, 2), "of two elements, not one entry")
+
+    d.next() match
+        Err(e) -> assert(false, e.message())
+        Ok(label) -> assert(is_text(label, "a"), "the label is an element of its own")
+
+    d.next() match
+        Err(e) -> assert(false, e.message())
+        Ok(value) -> assert(is_int(value, 1), "and so is the value")
+
+// ==================================================================================================
+// Finishing, sequences and position
+// ==================================================================================================
+
+// **A decode is not correct until `finish` says so.** Bytes left over mean the input was not what it
+// claimed, and this is how a protocol notices a message with something appended.
+@test
+trailing_bytes_are_caught_at_finish() =
+    var d = decoder(unhex("0102"), Normal)
+
+    d.next()
+
+    d.finish() match
+        Ok(_) -> assert(false, "there is a second item, so this is not one message")
+        Err(e) -> assert(e.kind() == ExtraBytes, "and it says which")
+
+// A CBOR **sequence** is several items in a row, where leftover bytes are the next message rather
+// than an error. `partial_finish` says how much this decode consumed and `remaining` is the rest.
+@test
+a_sequence_is_read_one_message_at_a_time() =
+    var d = decoder(unhex("0102"), Normal)
+
+    d.next()
+
+    d.partial_finish() match
+        Err(e) -> assert(false, e.message())
+        Ok(consumed) -> assert(consumed == 1, "one byte was this message")
+
+    assert(hex(d.remaining()) == "02", "and the rest is the next one")
+
+// `at_end` answers without consuming anything, which is what a loop over a sequence tests.
+@test
+at_end_reports_without_consuming() =
+    var d = decoder(unhex("01"), Normal)
+
+    assert(!d.at_end(), "there is an item")
+
+    d.next()
+
+    assert(d.at_end(), "and now there is not")
+
+// `rewind` returns to the start of the entered map, which is what makes one readable twice.
+@test
+rewind_reads_a_map_again() =
+    var d = decoder(sample(), Normal)
+
+    d.enter_map()
+
+    assert(int_of(d.get_int_in_map("a"), -1) == 1, "read once")
+
+    d.rewind()
+
+    assert(int_of(d.get_int_in_map("a"), -1) == 1, "and again after rewinding")
+
+// `tell` is where in the input the traversal is.
+@test
+tell_reports_the_position() =
+    var d = decoder(unhex("0102"), Normal)
+
+    assert(d.tell() == 0, "at the start")
+
+    d.next()
+
+    assert(d.tell() == 1, "and after one one-byte item")
+
+// ==================================================================================================
+// The string pool for indefinite-length strings
+// ==================================================================================================
+
+// **Without a pool an indefinite-length string is `NoStringAllocator`**, because QCBOR allocates
+// nothing and the chunks have nowhere to be joined. That is a clean refusal rather than a partial
+// answer, and it is the reason the pool exists at all.
+@test
+an_indefinite_string_needs_a_pool() =
+    // (_ "strea", "ming") — RFC 8949 appendix A
+    var d = decoder(unhex("7f657374726561646d696e67ff"), Normal)
+
+    d.next() match
+        Ok(_) -> assert(false, "there is nowhere to join the chunks")
+        Err(e) -> assert(e.kind() == NoStringAllocator, "and it says so")
+
+@test
+a_pool_joins_the_chunks_of_an_indefinite_string() =
+    var d = decoder(unhex("7f657374726561646d696e67ff"), Normal)
+    var pool: []u8 = [0u8; 256]
+
+    assert(pool.len > mem_pool_overhead(), "the pool must exceed QCBOR's own bookkeeping")
+
+    d.set_mem_pool(pool, false) match
+        Err(e) -> assert(false, e.message())
+        Ok(_) ->
+            d.next() match
+                Err(e) -> assert(false, e.message())
+                Ok(item) -> assert(is_text(item, "streaming"), "the chunks joined")
+
+// ==================================================================================================
+// Errors
+// ==================================================================================================
+
+private failed_next(r: Result[Item, Error]) -> bool =
+    r match
+        Err(_) -> true
+        Ok(_) -> false
+
+// **Not-well-formed is a different question from unsupported**, and a protocol that must tell a
+// corrupt message from one it cannot read needs both. `1f` is major type 0 with an argument value
+// that CBOR does not define, so it is not CBOR at all.
+@test
+a_malformed_input_is_reported_as_not_well_formed() =
+    var d = decoder(unhex("1f"), Normal)
+
+    d.next() match
+        Ok(_) -> assert(false, "1f is not well-formed CBOR")
+        Err(e) ->
+            assert(e.not_well_formed(), "the bytes are not CBOR")
+            assert(e.message() != "", "and QCBOR supplies a sentence for it")
+
+// Running off the end is its own answer, and it is the one a loop over items stops on.
+@test
+running_out_of_items_is_its_own_error() =
+    var d = decoder(unhex("01"), Normal)
+
+    d.next()
+
+    d.next() match
+        Ok(_) -> assert(false, "there was only one item")
+        Err(e) -> assert(e.kind() == NoMoreItems, "no more items")
+
+// **The two sides' error lists must stay in step**, since `shim.c` maps QCBOR's sparse numbers onto
+// the declaration order of `ErrorKind` and nothing but agreement keeps them aligned. Each of these
+// is provoked for real rather than constructed, so a variant inserted in the wrong place moves an
+// ordinal and one of them starts naming the wrong thing.
+@test
+the_error_kinds_line_up_with_the_c_side() =
+    var small: []u8 = [0u8; 1]
+    var e = encoder(small)
+
+    e.add_text("too long for one byte")
+
+    e.finish() match
+        Ok(_) -> assert(false, "it does not fit")
+        Err(err) -> assert(err.kind() == BufferTooSmall, "BufferTooSmall")
+
+    var open_map_out: []u8 = [0u8; 32]
+    var open_map = encoder(open_map_out)
+
+    open_map.open_map()
+
+    open_map.finish() match
+        Ok(_) -> assert(false, "the map is open")
+        Err(err) -> assert(err.kind() == ArrayOrMapStillOpen, "ArrayOrMapStillOpen")
+
+    var trailing = decoder(unhex("0102"), Normal)
+
+    trailing.next()
+
+    trailing.finish() match
+        Ok(_) -> assert(false, "there are trailing bytes")
+        Err(err) -> assert(err.kind() == ExtraBytes, "ExtraBytes")
+
+    var empty = decoder(unhex("01"), Normal)
+
+    empty.next()
+
+    empty.next() match
+        Ok(_) -> assert(false, "there was one item")
+        Err(err) -> assert(err.kind() == NoMoreItems, "NoMoreItems")
+
+    var typed = decoder(sample(), Normal)
+
+    typed.enter_map()
+
+    typed.get_int_in_map("b") match
+        Ok(_) -> assert(false, "b is text")
+        Err(err) -> assert(err.kind() == UnexpectedType, "UnexpectedType")
+
+    var absent = decoder(sample(), Normal)
+
+    absent.enter_map()
+
+    absent.get_int_in_map("zz") match
+        Ok(_) -> assert(false, "there is no such label")
+        Err(err) -> assert(err.kind() == LabelNotFound, "LabelNotFound")
+
+// An error number QCBOR has and this binding has not heard of still prints, rather than stopping a
+// `match` that has no arm for it. Constructed directly, because provoking one would need a QCBOR
+// newer than this.
+@test
+an_unknown_error_number_still_reports() =
+    val unknown = Error(200)
+
+    assert(unknown.kind() == Other, "it lands on the catch-all")
+    assert(unknown.message() != "", "and QCBOR still names it")
+    assert(unknown.code == 200, "with the original number kept")

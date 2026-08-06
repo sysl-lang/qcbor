@@ -931,8 +931,24 @@ int sysl_qcbor_decode_finish(SyslDecoder *d) {
     return (int)QCBORDecode_Finish(&d->ctx);
 }
 
+/* How many bytes this decode consumed, for reading a CBOR sequence one message
+ * at a time.
+ *
+ * **QCBOR_ERR_EXTRA_BYTES is not a failure here, and is turned into success.**
+ * `QCBORDecode_PartialFinish` is `Finish` with a byte count, so it reports
+ * leftover input the same way -- but leftover input is the entire point of a
+ * sequence: it is the next message. QCBOR's own header says so in as many
+ * words: "For typical use of this, that particular error is disregarded."
+ *
+ * Absorbing it here rather than in sysl is the same choice as everywhere else in
+ * this file: a rule the caller would have to know, and could forget, becomes a
+ * rule the binding keeps. Whether anything is left over is answered by `at_end`
+ * and `remaining`, which say it without dressing it as a failure.
+ */
 int sysl_qcbor_decode_partial_finish(SyslDecoder *d, size_t *consumed) {
-    return (int)QCBORDecode_PartialFinish(&d->ctx, consumed);
+    QCBORError err = QCBORDecode_PartialFinish(&d->ctx, consumed);
+
+    return (int)(err == QCBOR_ERR_EXTRA_BYTES ? QCBOR_SUCCESS : err);
 }
 
 size_t sysl_qcbor_decode_tell(SyslDecoder *d) { return QCBORDecode_Tell(&d->ctx); }

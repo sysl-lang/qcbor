@@ -891,6 +891,12 @@ struct Decoder
 
     // The same for a CBOR **sequence** -- several items in a row, where leftover bytes are the next
     // message rather than an error. Answers how many bytes this decode consumed.
+    //
+    // **Leftover input is not reported as a failure**, unlike `finish`, and that is the whole
+    // difference between them. QCBOR answers `ExtraBytes` here as it does there and its own header
+    // says to disregard it; `shim.c` does, so that the one call whose purpose is leftover bytes does
+    // not report their existence as something going wrong. `at_end` and `remaining` say whether
+    // anything is left.
     partial_finish(self) -> Result[usize, Error]
         var consumed: usize = 0
         val err = c_decode_partial_finish(self.handle, &consumed)
