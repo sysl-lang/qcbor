@@ -9,11 +9,11 @@
 // against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.1.1" }
+//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.1.2" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is a
-// tag `v0.1.1` on this repository. `build-lib` and `--lib` still work and are what the tests here
+// tag `v0.1.2` on this repository. `build-lib` and `--lib` still work and are what the tests here
 // use, but they are no longer the only way in.
 
 // `name` is the package; the module a program imports is `sh.sysl.qcbor`, and the two are
@@ -23,7 +23,7 @@
 
 package {
   name    = "qcbor"
-  version = "0.1.1"
+  version = "0.1.2"
 }
 
 // **There is deliberately no `requires` block.** QCBOR allocates nothing -- `malloc`, `calloc` and

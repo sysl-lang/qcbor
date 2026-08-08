@@ -19,14 +19,14 @@ private unhex(s: string) -> []u8
     require s.bytes.len % 2 == 0, "a hexadecimal byte string has an even number of digits"
 
     val b = s.bytes
-    var out: []u8 = [0u8; b.len / 2]
+    var out: []u8 = [0; b.len / 2]
 
     for i in 0..<out.len do out[i] = nib(b[i * 2]) * 16 + nib(b[i * 2 + 1])
 
     out
 end unhex
 
-private hex_digit(v: u8) -> char = if v < 10 then char(48u32 + u32(v)) else char(87u32 + u32(v))
+private hex_digit(v: u8) -> char = if v < 10 then char(48 + u32(v)) else char(87 + u32(v))
 
 private hex(bytes: []const u8) -> string
     var b = str_builder_with_capacity(bytes.len * 2)
@@ -50,7 +50,7 @@ end done
 // indented block does not reach inside an argument list (`00 §9`), so a case needing several calls
 // binds its closure to a name first, and the structural tests below do exactly that.
 private check(expected: string, note: string, build: Encoder -> unit)
-    var out: []u8 = [0u8; 128]
+    var out: []u8 = [0; 128]
     var e = encoder(out)
 
     build(e)
@@ -74,7 +74,7 @@ end make_one
 
 @test
 an_encoder_outlives_the_function_that_made_it() =
-    var out: []u8 = [0u8; 32]
+    var out: []u8 = [0; 32]
     var e = make_one(out)
 
     e.add_int(1)
@@ -86,8 +86,8 @@ an_encoder_outlives_the_function_that_made_it() =
 // The storage a caller supplies is the allocator-free path, and it must reach the same bytes.
 @test
 an_encoder_can_be_given_its_own_storage() =
-    var storage: []u64 = [0u64; encode_words()]
-    var out: []u8 = [0u8; 32]
+    var storage: []u64 = [0; encode_words()]
+    var out: []u8 = [0; 32]
 
     encoder_with_storage(storage, out) match
         Err(why) -> assert(false, why)
@@ -98,8 +98,8 @@ an_encoder_can_be_given_its_own_storage() =
 // Storage shorter than the context needs is refused rather than written past.
 @test
 storage_that_is_too_small_is_refused() =
-    var storage: []u64 = [0u64; 1]
-    var out: []u8 = [0u8; 32]
+    var storage: []u64 = [0; 1]
+    var out: []u8 = [0; 32]
 
     encoder_with_storage(storage, out) match
         Ok(_) -> assert(false, "one word is not enough for a context and should have been refused")
@@ -126,7 +126,7 @@ encodes_the_unsigned_integers() =
 // reason `add_uint` is a method of its own rather than `add_int` taking the wider type.
 @test
 encodes_the_largest_unsigned_integer() =
-    check("1bffffffffffffffff", "18446744073709551615", e -> e.add_uint(18446744073709551615u64))
+    check("1bffffffffffffffff", "18446744073709551615", e -> e.add_uint(18446744073709551615))
 
 @test
 encodes_the_negative_integers() =
@@ -141,8 +141,8 @@ encodes_the_simple_values() =
     check("f5", "true", e -> e.add_bool(true))
     check("f6", "null", e -> e.add_null())
     check("f7", "undefined", e -> e.add_undef())
-    check("f0", "simple(16)", e -> e.add_simple(16u8))
-    check("f8ff", "simple(255)", e -> e.add_simple(255u8))
+    check("f0", "simple(16)", e -> e.add_simple(16))
+    check("f8ff", "simple(255)", e -> e.add_simple(255))
 
 // **Preferred serialization is what makes these two bytes.** A double whose value fits a half
 // exactly is written as a half, which is RFC 8949's rule and what a protocol needing deterministic
@@ -171,7 +171,7 @@ encodes_the_small_halves() =
 @test
 encodes_floats_at_full_width_when_asked() =
     check("fb3ff0000000000000", "1.0 as a double", e -> e.add_double_exact(1.0))
-    check("fa3f800000", "1.0 as a float", e -> e.add_float_exact(1.0f32))
+    check("fa3f800000", "1.0 as a float", e -> e.add_float_exact(1.0))
 
 @test
 encodes_the_text_strings() =
@@ -353,25 +353,25 @@ a_borrowed_tag_writes_the_content_alone() =
 // specification and the CBOR registry fix.
 @test
 the_registered_tag_numbers_are_what_the_registry_says() =
-    assert(tag_date_string() == 0u64, "tag 0 is an RFC 3339 date string")
-    assert(tag_date_epoch() == 1u64, "tag 1 is an epoch date")
-    assert(tag_pos_bignum() == 2u64, "tag 2 is a positive bignum")
-    assert(tag_neg_bignum() == 3u64, "tag 3 is a negative bignum")
-    assert(tag_decimal_fraction() == 4u64, "tag 4 is a decimal fraction")
-    assert(tag_bigfloat() == 5u64, "tag 5 is a big float")
-    assert(tag_enc_as_b64url() == 21u64, "tag 21 is expected-base64url")
-    assert(tag_enc_as_b64() == 22u64, "tag 22 is expected-base64")
-    assert(tag_enc_as_b16() == 23u64, "tag 23 is expected-base16")
-    assert(tag_cbor() == 24u64, "tag 24 is encoded CBOR")
-    assert(tag_uri() == 32u64, "tag 32 is a URI")
-    assert(tag_b64url() == 33u64, "tag 33 is base64url")
-    assert(tag_b64() == 34u64, "tag 34 is base64")
-    assert(tag_regex() == 35u64, "tag 35 is a regular expression")
-    assert(tag_mime() == 36u64, "tag 36 is a MIME message")
-    assert(tag_bin_uuid() == 37u64, "tag 37 is a binary UUID")
-    assert(tag_days_epoch() == 100u64, "tag 100 is an epoch day count")
-    assert(tag_days_string() == 1004u64, "tag 1004 is a full-date string")
-    assert(tag_cbor_magic() == 55799u64, "tag 55799 is the self-describing prefix")
+    assert(tag_date_string() == 0, "tag 0 is an RFC 3339 date string")
+    assert(tag_date_epoch() == 1, "tag 1 is an epoch date")
+    assert(tag_pos_bignum() == 2, "tag 2 is a positive bignum")
+    assert(tag_neg_bignum() == 3, "tag 3 is a negative bignum")
+    assert(tag_decimal_fraction() == 4, "tag 4 is a decimal fraction")
+    assert(tag_bigfloat() == 5, "tag 5 is a big float")
+    assert(tag_enc_as_b64url() == 21, "tag 21 is expected-base64url")
+    assert(tag_enc_as_b64() == 22, "tag 22 is expected-base64")
+    assert(tag_enc_as_b16() == 23, "tag 23 is expected-base16")
+    assert(tag_cbor() == 24, "tag 24 is encoded CBOR")
+    assert(tag_uri() == 32, "tag 32 is a URI")
+    assert(tag_b64url() == 33, "tag 33 is base64url")
+    assert(tag_b64() == 34, "tag 34 is base64")
+    assert(tag_regex() == 35, "tag 35 is a regular expression")
+    assert(tag_mime() == 36, "tag 36 is a MIME message")
+    assert(tag_bin_uuid() == 37, "tag 37 is a binary UUID")
+    assert(tag_days_epoch() == 100, "tag 100 is an epoch day count")
+    assert(tag_days_string() == 1004, "tag 1004 is a full-date string")
+    assert(tag_cbor_magic() == 55799, "tag 55799 is the self-describing prefix")
 
 // ==================================================================================================
 // Errors
@@ -382,7 +382,7 @@ the_registered_tag_numbers_are_what_the_registry_says() =
 // `add` methods report anything.
 @test
 a_buffer_too_small_is_reported_once_at_the_end() =
-    var out: []u8 = [0u8; 2]
+    var out: []u8 = [0; 2]
     var e = encoder(out)
 
     e.add_text("more than two bytes")
@@ -396,7 +396,7 @@ a_buffer_too_small_is_reported_once_at_the_end() =
 // An unclosed map is caught at `finish` rather than left to produce truncated CBOR.
 @test
 an_unclosed_map_is_caught() =
-    var out: []u8 = [0u8; 32]
+    var out: []u8 = [0; 32]
     var e = encoder(out)
 
     e.open_map()
@@ -418,7 +418,7 @@ an_unclosed_map_is_caught() =
 // noticed here rather than by whoever is reading the output at the far end.
 @test
 a_dangling_label_is_not_caught() =
-    var out: []u8 = [0u8; 32]
+    var out: []u8 = [0; 32]
     var e = encoder(out)
 
     e.open_map()
@@ -449,7 +449,7 @@ an_encoder_with_no_buffer_counts_what_it_would_write() =
     counter.finish_get_size() match
         Err(why) -> assert(false, why.message())
         Ok(size) ->
-            var out: []u8 = [0u8; 64]
+            var out: []u8 = [0; 64]
             var e = encoder(out)
 
             e.open_array()
@@ -465,7 +465,7 @@ an_encoder_with_no_buffer_counts_what_it_would_write() =
 // safe. A CBOR sequence -- several top-level items in a row -- is what this is for.
 @test
 substring_reports_what_was_written_since_a_position() =
-    var out: []u8 = [0u8; 64]
+    var out: []u8 = [0; 64]
     var e = encoder(out)
 
     e.add_int(7)
@@ -491,7 +491,7 @@ substring_reports_what_was_written_since_a_position() =
 // around rather than left to be discovered.
 @test
 a_span_does_not_survive_the_close_of_an_enclosing_array() =
-    var out: []u8 = [0u8; 64]
+    var out: []u8 = [0; 64]
     var e = encoder(out)
 
     e.open_array()
@@ -515,15 +515,15 @@ a_span_does_not_survive_the_close_of_an_enclosing_array() =
 // A byte string whose content is written straight into the output buffer, with no second copy.
 @test
 open_bytes_writes_into_the_output_buffer() =
-    var out: []u8 = [0u8; 64]
+    var out: []u8 = [0; 64]
     var e = encoder(out)
 
     e.open_bytes() match
         None -> assert(false, "there should be room")
         Some(place) ->
-            place[0] = 1u8
-            place[1] = 2u8
-            place[2] = 3u8
+            place[0] = 1
+            place[1] = 2
+            place[2] = 3
             e.close_bytes(3)
 
     assert(done(e, out) == "43010203", "h'010203'")
@@ -532,7 +532,7 @@ open_bytes_writes_into_the_output_buffer() =
 // signed. The span is what a caller would hash.
 @test
 bstr_wrap_reports_where_the_wrapped_bytes_are() =
-    var out: []u8 = [0u8; 64]
+    var out: []u8 = [0; 64]
     var e = encoder(out)
 
     e.bstr_wrap()
@@ -563,17 +563,17 @@ encoded_bytes_are_spliced_in_unchanged() =
 // through it.
 @test
 a_head_can_be_encoded_on_its_own() =
-    var out: []u8 = [0u8; 16]
+    var out: []u8 = [0; 16]
 
     assert(head_max() >= 9, "a head is at most nine or ten bytes")
 
     // Major type 0 is an unsigned integer; a minimum length of 0 lets QCBOR pick the shortest form.
-    encode_head(out, 0u8, 0u8, 1000000u64) match
+    encode_head(out, 0, 0, 1000000) match
         None -> assert(false, "there should be room")
         Some(n) -> assert(hex(out[0..<n]) == "1a000f4240", "the head of 1000000")
 
     // Major type 2 is a byte string, and 4 is its length.
-    encode_head(out, 2u8, 0u8, 4u64) match
+    encode_head(out, 2, 0, 4) match
         None -> assert(false, "there should be room")
         Some(n) -> assert(hex(out[0..<n]) == "44", "the head of a four-byte byte string")
 
@@ -688,7 +688,7 @@ the_largest_unsigned_integer_decodes_as_a_uint() =
 
     assert(item.kind() == Uint, "too large for a signed long")
     assert(!has_int(item), "so the signed accessor declines")
-    assert(is_uint(item, 18446744073709551615u64), "18446744073709551615")
+    assert(is_uint(item, 18446744073709551615), "18446744073709551615")
 
 @test
 decodes_the_floats() =
@@ -710,8 +710,8 @@ decodes_the_simple_values() =
     assert(is_bool(only("f5"), true), "true")
     assert(only("f6").kind() == Null, "null")
     assert(only("f7").kind() == Undef, "undefined")
-    assert(is_simple(only("f0"), 16u8), "simple(16)")
-    assert(is_simple(only("f8ff"), 255u8), "simple(255)")
+    assert(is_simple(only("f0"), 16), "simple(16)")
+    assert(is_simple(only("f8ff"), 255), "simple(255)")
 
 @test
 decodes_the_text_strings() =
@@ -792,7 +792,7 @@ decodes_an_array_head_and_its_members() =
             Err(why) -> assert(false, why.message())
             Ok(item) ->
                 assert(is_int(item, long(seen + 1)), "the members in order")
-                assert(item.nesting() == 1u8, "one level in")
+                assert(item.nesting() == 1, "one level in")
                 seen = seen + 1
 
     assert(finished(d), "and the input is exhausted")
@@ -849,13 +849,13 @@ an_indefinite_array_has_no_count_and_ends_by_nesting() =
 
     d.next() match
         Err(why) -> assert(false, why.message())
-        Ok(first) -> assert(first.next_nesting() == 1u8, "another member follows at this level")
+        Ok(first) -> assert(first.next_nesting() == 1, "another member follows at this level")
 
     d.next() match
         Err(why) -> assert(false, why.message())
         Ok(last) ->
             assert(is_int(last, 2), "the last member")
-            assert(last.next_nesting() == 0u8, "and the level closed after it")
+            assert(last.next_nesting() == 0, "and the level closed after it")
 
 // Skipping a subtree whose content does not matter, in one call rather than by counting members.
 @test
@@ -1129,7 +1129,7 @@ reads_a_big_float() =
 reads_a_decimal_fraction_with_a_wide_mantissa() =
     // 4([-2, 2(h'010000000000000000')])
     var d = decoder(unhex("c48221c249010000000000000000"), Normal)
-    var scratch: []u8 = [0u8; 32]
+    var scratch: []u8 = [0; 32]
 
     d.get_decimal_fraction_big(scratch, Required) match
         Err(e) -> assert(false, e.message())
@@ -1431,7 +1431,7 @@ an_indefinite_string_needs_a_pool() =
 @test
 a_pool_joins_the_chunks_of_an_indefinite_string() =
     var d = decoder(unhex("7f657374726561646d696e67ff"), Normal)
-    var pool: []u8 = [0u8; 256]
+    var pool: []u8 = [0; 256]
 
     assert(pool.len > mem_pool_overhead(), "the pool must exceed QCBOR's own bookkeeping")
 
@@ -1481,7 +1481,7 @@ running_out_of_items_is_its_own_error() =
 // ordinal and one of them starts naming the wrong thing.
 @test
 the_error_kinds_line_up_with_the_c_side() =
-    var small: []u8 = [0u8; 1]
+    var small: []u8 = [0; 1]
     var e = encoder(small)
 
     e.add_text("too long for one byte")
@@ -1490,7 +1490,7 @@ the_error_kinds_line_up_with_the_c_side() =
         Ok(_) -> assert(false, "it does not fit")
         Err(err) -> assert(err.kind() == BufferTooSmall, "BufferTooSmall")
 
-    var open_map_out: []u8 = [0u8; 32]
+    var open_map_out: []u8 = [0; 32]
     var open_map = encoder(open_map_out)
 
     open_map.open_map()
@@ -1604,7 +1604,7 @@ end bump
 a_caller_can_supply_its_own_allocator() =
     // (_ "strea", "ming") -- RFC 8949 appendix A, which needs somewhere to join the two chunks.
     var d = decoder(unhex("7f657374726561646d696e67ff"), Normal)
-    var block: []u8 = [0u8; 256]
+    var block: []u8 = [0; 256]
     var arena = Arena(block, 0, 0)
 
     d.set_allocator(&bump, ptr_cast(&arena), false)
@@ -1625,7 +1625,7 @@ a_caller_can_supply_its_own_allocator() =
 
 @test
 the_readme_encoding_example_works() =
-    var out: []u8 = [0u8; 256]
+    var out: []u8 = [0; 256]
     var e = encoder(out)
 
     e.open_map()

@@ -631,7 +631,7 @@ end Span
 // `finish_get_size` reports what the encoding would have taken, which is how a caller sizes a buffer
 // before making one.
 encoder(out: []u8) -> Encoder
-    var storage: []u64 = [0u64; c_encode_words()]
+    var storage: []u64 = [0; c_encode_words()]
 
     // Cannot fail: the storage was just sized by asking C what it needs.
     encoder_with_storage(storage, out).unwrap()
@@ -1018,7 +1018,7 @@ struct Decoder
     get_uint_in_map_at(self, label: long) -> Result[ulong, Error] = self.uint_by(lk_int, label, no_label())
 
     private uint_by(self, lk: int, ln: long, lb: []const u8) -> Result[ulong, Error]
-        var v: ulong = 0u64
+        var v: ulong = 0
 
         result(c_get_uint64(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end uint_by
@@ -1054,7 +1054,7 @@ struct Decoder
     get_simple_in_map_at(self, label: long) -> Result[u8, Error] = self.simple_by(lk_int, label, no_label())
 
     private simple_by(self, lk: int, ln: long, lb: []const u8) -> Result[u8, Error]
-        var v: u8 = 0u8
+        var v: u8 = 0
 
         result(c_get_simple(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end simple_by
@@ -1156,7 +1156,7 @@ struct Decoder
         self.uint_conv(lk_int, label, no_label(), conversions, true)
 
     private uint_conv(self, lk: int, ln: long, lb: []const u8, types: u32, all: bool) -> Result[ulong, Error]
-        var v: ulong = 0u64
+        var v: ulong = 0
         var err: int = 0
 
         if all then
@@ -1799,7 +1799,7 @@ items_capacity() -> usize = c_items_capacity()
 
 // A list of labels to fetch from `of`'s entered map in one pass.
 item_list(of: Decoder) -> ItemList
-    var storage: []u64 = [0u64; c_items_words()]
+    var storage: []u64 = [0; c_items_words()]
 
     // Cannot fail: the storage was just sized by asking C what it needs.
     ItemList(storage, c_items_init(&storage[0], storage.len), of)
@@ -1996,7 +1996,7 @@ struct Item
     tags(self) -> []u64
         val limit = usize(c_max_tags_per_item())
 
-        var found: []u64 = [0u64; limit]
+        var found: []u64 = [0; limit]
         var n: usize = 0
 
         while n < limit
@@ -2011,14 +2011,14 @@ struct Item
 
     // Whether this item carries a given tag number anywhere in its stack.
     tagged_with(self, tag: u64) -> bool
-        var i = 0u32
+        var i: u32 = 0
 
         while i < c_max_tags_per_item()
             self.tag(i) match
                 None -> return false
                 Some(t) -> if t == tag then return true
 
-            i = i + 1u32
+            i = i + 1
 
         false
     end tagged_with
@@ -2040,7 +2040,7 @@ mem_pool_overhead() -> usize = c_mem_pool_overhead()
 // alive. **`input` is not copied**, and every string the decode reports is a view into it, so it must
 // outlive the values read out of it.
 decoder(input: []const u8, mode: DecodeMode) -> Decoder
-    var storage: []u64 = [0u64; c_decoder_words()]
+    var storage: []u64 = [0; c_decoder_words()]
 
     // Cannot fail: the storage was just sized by asking C what it needs.
     decoder_with_storage(storage, input, mode).unwrap()
