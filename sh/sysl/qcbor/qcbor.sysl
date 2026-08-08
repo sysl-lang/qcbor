@@ -1,6 +1,7 @@
 module sh.sysl.qcbor
 @link("m")
 
+import sysl.slices.{as_ptr, as_mut_ptr}
 import sysl.text.{from_utf8, from_cstring, cstring, Utf8Error}
 
 // CBOR (RFC 8949), bound to QCBOR 1.6.1.
@@ -369,15 +370,15 @@ struct Encoder
     add_text(self, s: string)
         val b = s.bytes
 
-        c_add_text(self.handle, first(b), b.len)
+        c_add_text(self.handle, as_ptr(b), b.len)
     end add_text
 
     // A byte string, which in CBOR is a different major type from text and not interchangeable.
-    add_bytes(self, b: []const u8) = c_add_bytes(self.handle, first(b), b.len)
+    add_bytes(self, b: []const u8) = c_add_bytes(self.handle, as_ptr(b), b.len)
 
     // The head of a byte string with no content, for computing what an encoding would take without
     // having the bytes.
-    add_bytes_len_only(self, b: []const u8) = c_add_bytes_len_only(self.handle, first(b), b.len)
+    add_bytes_len_only(self, b: []const u8) = c_add_bytes_len_only(self.handle, as_ptr(b), b.len)
 
     // Open a byte string whose content is written into the output buffer directly, then say how much
     // was written. This is what avoids a second copy when the content is produced by something that
@@ -426,17 +427,17 @@ struct Encoder
     add_date_string(self, s: string, tagged: bool)
         val b = s.bytes
 
-        c_add_date_string(self.handle, flag(tagged), first(b), b.len)
+        c_add_date_string(self.handle, flag(tagged), as_ptr(b), b.len)
     end add_date_string
 
     add_days_string(self, s: string, tagged: bool)
         val b = s.bytes
 
-        c_add_days_string(self.handle, flag(tagged), first(b), b.len)
+        c_add_days_string(self.handle, flag(tagged), as_ptr(b), b.len)
     end add_days_string
 
     add_binary_uuid(self, b: []const u8, tagged: bool) =
-        c_add_binary_uuid(self.handle, flag(tagged), first(b), b.len)
+        c_add_binary_uuid(self.handle, flag(tagged), as_ptr(b), b.len)
 
     // An arbitrary-precision integer, big-endian, most significant byte first.
     //
@@ -444,10 +445,10 @@ struct Encoder
     // -1 minus the value, so -1 is an empty or zero byte string and -256 is `ff`. Passing the
     // magnitude produces a number one too large, and nothing will tell you.
     add_positive_bignum(self, b: []const u8, tagged: bool) =
-        c_add_pos_bignum(self.handle, flag(tagged), first(b), b.len)
+        c_add_pos_bignum(self.handle, flag(tagged), as_ptr(b), b.len)
 
     add_negative_bignum(self, b: []const u8, tagged: bool) =
-        c_add_neg_bignum(self.handle, flag(tagged), first(b), b.len)
+        c_add_neg_bignum(self.handle, flag(tagged), as_ptr(b), b.len)
 
     // Mantissa times ten to the exponent, as tag 4 -- the way to carry a decimal amount without a
     // binary float's rounding. `(273, -2)` is 2.73 exactly.
@@ -458,7 +459,7 @@ struct Encoder
     // `add_negative_bignum` when `negative` is true.
     add_decimal_fraction_bignum(self, mantissa: []const u8, negative: bool, exponent: long,
                                 tagged: bool) =
-        c_add_decimal_fraction_big(self.handle, flag(tagged), first(mantissa), mantissa.len,
+        c_add_decimal_fraction_big(self.handle, flag(tagged), as_ptr(mantissa), mantissa.len,
                                    flag(negative), exponent)
 
     // Mantissa times two to the exponent, as tag 5.
@@ -466,38 +467,38 @@ struct Encoder
         c_add_big_float(self.handle, flag(tagged), mantissa, exponent)
 
     add_big_float_bignum(self, mantissa: []const u8, negative: bool, exponent: long, tagged: bool) =
-        c_add_big_float_big(self.handle, flag(tagged), first(mantissa), mantissa.len,
+        c_add_big_float_big(self.handle, flag(tagged), as_ptr(mantissa), mantissa.len,
                             flag(negative), exponent)
 
     add_uri(self, s: string, tagged: bool)
         val b = s.bytes
 
-        c_add_uri(self.handle, flag(tagged), first(b), b.len)
+        c_add_uri(self.handle, flag(tagged), as_ptr(b), b.len)
     end add_uri
 
     add_b64(self, s: string, tagged: bool)
         val b = s.bytes
 
-        c_add_b64(self.handle, flag(tagged), first(b), b.len)
+        c_add_b64(self.handle, flag(tagged), as_ptr(b), b.len)
     end add_b64
 
     add_b64url(self, s: string, tagged: bool)
         val b = s.bytes
 
-        c_add_b64url(self.handle, flag(tagged), first(b), b.len)
+        c_add_b64url(self.handle, flag(tagged), as_ptr(b), b.len)
     end add_b64url
 
     add_regex(self, s: string, tagged: bool)
         val b = s.bytes
 
-        c_add_regex(self.handle, flag(tagged), first(b), b.len)
+        c_add_regex(self.handle, flag(tagged), as_ptr(b), b.len)
     end add_regex
 
     // A MIME message, headers and all, as tag 36.
     add_mime(self, s: string, tagged: bool)
         val b = s.bytes
 
-        c_add_mime(self.handle, flag(tagged), first(b), b.len)
+        c_add_mime(self.handle, flag(tagged), as_ptr(b), b.len)
     end add_mime
 
     // -- Structure ---------------------------------------------------------------------------------
@@ -554,7 +555,7 @@ struct Encoder
 
     // Splice in bytes that are already CBOR, without checking them. Whatever is passed becomes part
     // of the output as-is, so it had better be well-formed and exactly one data item.
-    add_encoded(self, b: []const u8) = c_add_encoded(self.handle, first(b), b.len)
+    add_encoded(self, b: []const u8) = c_add_encoded(self.handle, as_ptr(b), b.len)
 
     // -- Finishing and inspection ------------------------------------------------------------------
 
@@ -648,13 +649,14 @@ encoder_with_storage(storage: []u64, out: []u8) -> Result[Encoder, string]
     require storage.len > 0, "an encoding context needs storage; size it with encode_words()"
 
     // **An empty buffer must reach C as a null pointer, not as a pointer to nothing.** QCBOR decides
-    // it is in size-calculation mode by testing the pointer rather than the length, so the scratch
-    // byte `first_mut` hands back for an empty slice -- which is right everywhere else, because C
-    // reads a length beside it -- would put the encoder into ordinary mode over a zero-length buffer
-    // and turn every write into `BufferTooSmall`. This is the one place that distinction is load
-    // bearing, and a test caught it.
-    val ctx = c_encode_init(&storage[0], storage.len,
-                            if out.len == 0 then null else &out[0], out.len)
+    // it is in size-calculation mode by testing the pointer rather than the length, so a pointer to
+    // any real byte would put the encoder into ordinary mode over a zero-length buffer and turn every
+    // write into `BufferTooSmall`. A test caught that.
+    //
+    // This line used to spell the empty case out by hand, because the private helper it would
+    // otherwise have called answered a scratch byte. `as_mut_ptr` answers `null`, so the general
+    // function is now the one this wants and the special case is gone.
+    val ctx = c_encode_init(&storage[0], storage.len, as_mut_ptr(out), out.len)
 
     if ctx == null then
         Err("the storage for an encoding context is too small; size it with encode_words()")
@@ -668,7 +670,7 @@ end encoder_with_storage
 // This is for a caller assembling CBOR around this binding rather than through it: computing a length
 // prefix for bytes another library will produce, or writing a streaming header by hand.
 encode_head(out: []u8, major_type: u8, min_len: u8, number: u64) -> Option[usize]
-    val n = c_encode_head(first_mut(out), out.len, major_type, min_len, number)
+    val n = c_encode_head(as_mut_ptr(out), out.len, major_type, min_len, number)
 
     if n == 0 then None else Some(n)
 end encode_head
@@ -951,7 +953,7 @@ struct Decoder
     //
     // The pool must be longer than `mem_pool_overhead()`, which is QCBOR's own bookkeeping.
     set_mem_pool(self, pool: []u8, all_strings: bool) -> Result[unit, Error]
-        val err = c_decode_set_mem_pool(self.handle, first_mut(pool), pool.len, flag(all_strings))
+        val err = c_decode_set_mem_pool(self.handle, as_mut_ptr(pool), pool.len, flag(all_strings))
 
         if err == 0 then Ok(()) else Err(Error(err))
     end set_mem_pool
@@ -1008,7 +1010,7 @@ struct Decoder
     private int_by(self, lk: int, ln: long, lb: []const u8) -> Result[long, Error]
         var v: long = 0
 
-        result(c_get_int64(self.handle, lk, ln, first(lb), lb.len, &v), v)
+        result(c_get_int64(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end int_by
 
     get_uint(self) -> Result[ulong, Error] = self.uint_by(lk_none, 0, no_label())
@@ -1018,7 +1020,7 @@ struct Decoder
     private uint_by(self, lk: int, ln: long, lb: []const u8) -> Result[ulong, Error]
         var v: ulong = 0u64
 
-        result(c_get_uint64(self.handle, lk, ln, first(lb), lb.len, &v), v)
+        result(c_get_uint64(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end uint_by
 
     // -- Floating point ----------------------------------------------------------------------------
@@ -1032,7 +1034,7 @@ struct Decoder
     private double_by(self, lk: int, ln: long, lb: []const u8) -> Result[real, Error]
         var v: real = 0.0
 
-        result(c_get_double(self.handle, lk, ln, first(lb), lb.len, &v), v)
+        result(c_get_double(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end double_by
 
     // -- Simple values -----------------------------------------------------------------------------
@@ -1044,7 +1046,7 @@ struct Decoder
     private bool_by(self, lk: int, ln: long, lb: []const u8) -> Result[bool, Error]
         var v: int = 0
 
-        result(c_get_bool(self.handle, lk, ln, first(lb), lb.len, &v), v != 0)
+        result(c_get_bool(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v != 0)
     end bool_by
 
     get_simple(self) -> Result[u8, Error] = self.simple_by(lk_none, 0, no_label())
@@ -1054,20 +1056,20 @@ struct Decoder
     private simple_by(self, lk: int, ln: long, lb: []const u8) -> Result[u8, Error]
         var v: u8 = 0u8
 
-        result(c_get_simple(self.handle, lk, ln, first(lb), lb.len, &v), v)
+        result(c_get_simple(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end simple_by
 
     // These two carry no value: what is being asked is "is the next item this, and step over it".
     get_null(self) -> Result[unit, Error] = unit_result(c_get_null(self.handle, lk_none, 0, null, 0))
     get_null_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_get_null(self.handle, lk_text, 0, first(label.bytes), label.bytes.len))
+        unit_result(c_get_null(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
     get_null_in_map_at(self, label: long) -> Result[unit, Error] =
         unit_result(c_get_null(self.handle, lk_int, label, null, 0))
 
     get_undefined(self) -> Result[unit, Error] =
         unit_result(c_get_undefined(self.handle, lk_none, 0, null, 0))
     get_undefined_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_get_undefined(self.handle, lk_text, 0, first(label.bytes), label.bytes.len))
+        unit_result(c_get_undefined(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
     get_undefined_in_map_at(self, label: long) -> Result[unit, Error] =
         unit_result(c_get_undefined(self.handle, lk_int, label, null, 0))
 
@@ -1085,7 +1087,7 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_get_bytes(self.handle, lk, ln, first(lb), lb.len, &p, &n), p, n)
+        str_result(c_get_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n), p, n)
     end bytes_by
 
     // The bytes of a text string. Still a view -- `text_of` turns one into a `string`.
@@ -1099,7 +1101,7 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_get_text(self.handle, lk, ln, first(lb), lb.len, &p, &n), p, n)
+        str_result(c_get_text(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n), p, n)
     end text_by
 
     // -- Converting getters ------------------------------------------------------------------------
@@ -1132,9 +1134,9 @@ struct Decoder
         var err: int = 0
 
         if all then
-            err = c_get_int64_convert_all(self.handle, lk, ln, first(lb), lb.len, types, &v)
+            err = c_get_int64_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
         else
-            err = c_get_int64_convert(self.handle, lk, ln, first(lb), lb.len, types, &v)
+            err = c_get_int64_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
 
         result(err, v)
     end int_conv
@@ -1158,9 +1160,9 @@ struct Decoder
         var err: int = 0
 
         if all then
-            err = c_get_uint64_convert_all(self.handle, lk, ln, first(lb), lb.len, types, &v)
+            err = c_get_uint64_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
         else
-            err = c_get_uint64_convert(self.handle, lk, ln, first(lb), lb.len, types, &v)
+            err = c_get_uint64_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
 
         result(err, v)
     end uint_conv
@@ -1184,9 +1186,9 @@ struct Decoder
         var err: int = 0
 
         if all then
-            err = c_get_double_convert_all(self.handle, lk, ln, first(lb), lb.len, types, &v)
+            err = c_get_double_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
         else
-            err = c_get_double_convert(self.handle, lk, ln, first(lb), lb.len, types, &v)
+            err = c_get_double_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
 
         result(err, v)
     end double_conv
@@ -1218,9 +1220,9 @@ struct Decoder
         var err: int = 0
 
         if seconds then
-            err = c_get_epoch_date(self.handle, lk, ln, first(lb), lb.len, req, &v)
+            err = c_get_epoch_date(self.handle, lk, ln, as_ptr(lb), lb.len, req, &v)
         else
-            err = c_get_epoch_days(self.handle, lk, ln, first(lb), lb.len, req, &v)
+            err = c_get_epoch_days(self.handle, lk, ln, as_ptr(lb), lb.len, req, &v)
 
         result(err, v)
     end epoch
@@ -1283,7 +1285,7 @@ struct Decoder
 
         val req = c_tag_requirement(int(tags))
 
-        str_result(c_get_tagged_str(self.handle, which, lk, ln, first(lb), lb.len, req, &p, &n), p, n)
+        str_result(c_get_tagged_str(self.handle, which, lk, ln, as_ptr(lb), lb.len, req, &p, &n), p, n)
     end tagged_str
 
     // An arbitrary-precision integer. **The sign is which tag it carried, not part of the bytes**,
@@ -1301,7 +1303,7 @@ struct Decoder
         var n: usize = 0
         var negative: int = 0
 
-        val err = c_get_bignum(self.handle, lk, ln, first(lb), lb.len, c_tag_requirement(int(tags)),
+        val err = c_get_bignum(self.handle, lk, ln, as_ptr(lb), lb.len, c_tag_requirement(int(tags)),
                                &p, &n, &negative)
 
         if err != 0 then
@@ -1326,7 +1328,7 @@ struct Decoder
         var n: usize = 0
         var binary: int = 0
 
-        val err = c_get_mime(self.handle, lk, ln, first(lb), lb.len, c_tag_requirement(int(tags)), &p, &n, &binary)
+        val err = c_get_mime(self.handle, lk, ln, as_ptr(lb), lb.len, c_tag_requirement(int(tags)), &p, &n, &binary)
 
         if err != 0 then
             Err(Error(err))
@@ -1363,9 +1365,9 @@ struct Decoder
         var err: int = 0
 
         if decimal then
-            err = c_get_decimal_fraction(self.handle, lk, ln, first(lb), lb.len, req, &mantissa, &exponent)
+            err = c_get_decimal_fraction(self.handle, lk, ln, as_ptr(lb), lb.len, req, &mantissa, &exponent)
         else
-            err = c_get_big_float(self.handle, lk, ln, first(lb), lb.len, req, &mantissa, &exponent)
+            err = c_get_big_float(self.handle, lk, ln, as_ptr(lb), lb.len, req, &mantissa, &exponent)
 
         if err == 0 then Ok(ExpMantissa(mantissa, exponent)) else Err(Error(err))
     end exp_mantissa
@@ -1407,10 +1409,10 @@ struct Decoder
         var err: int = 0
 
         if decimal then
-            err = c_get_decimal_fraction_big(self.handle, lk, ln, first(lb), lb.len, req, first_mut(scratch),
+            err = c_get_decimal_fraction_big(self.handle, lk, ln, as_ptr(lb), lb.len, req, as_mut_ptr(scratch),
                                        scratch.len, &p, &n, &negative, &exponent)
         else
-            err = c_get_big_float_big(self.handle, lk, ln, first(lb), lb.len, req, first_mut(scratch),
+            err = c_get_big_float_big(self.handle, lk, ln, as_ptr(lb), lb.len, req, as_mut_ptr(scratch),
 
                                     scratch.len, &p, &n, &negative, &exponent)
 
@@ -1431,14 +1433,14 @@ struct Decoder
     enter_map(self) -> Result[unit, Error] =
         unit_result(c_enter_map(self.handle, lk_none, 0, null, 0))
     enter_map_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_enter_map(self.handle, lk_text, 0, first(label.bytes), label.bytes.len))
+        unit_result(c_enter_map(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
     enter_map_in_map_at(self, label: long) -> Result[unit, Error] =
         unit_result(c_enter_map(self.handle, lk_int, label, null, 0))
 
     enter_array(self) -> Result[unit, Error] =
         unit_result(c_enter_array(self.handle, lk_none, 0, null, 0))
     enter_array_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_enter_array(self.handle, lk_text, 0, first(label.bytes), label.bytes.len))
+        unit_result(c_enter_array(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
     enter_array_in_map_at(self, label: long) -> Result[unit, Error] =
         unit_result(c_enter_array(self.handle, lk_int, label, null, 0))
 
@@ -1466,9 +1468,9 @@ struct Decoder
         var err: int = 0
 
         if map then
-            err = c_get_map_bytes(self.handle, lk, ln, first(lb), lb.len, &p, &n)
+            err = c_get_map_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n)
         else
-            err = c_get_array_bytes(self.handle, lk, ln, first(lb), lb.len, &p, &n)
+            err = c_get_array_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n)
 
         str_result(err, p, n)
     end nested_bytes
@@ -1489,7 +1491,7 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_enter_bstr_wrapped(self.handle, lk, ln, first(lb), lb.len, c_tag_requirement(int(tags)),
+        str_result(c_enter_bstr_wrapped(self.handle, lk, ln, as_ptr(lb), lb.len, c_tag_requirement(int(tags)),
                                         &p, &n), p, n)
     end bstr_by
 
@@ -1498,7 +1500,7 @@ struct Decoder
     // One item by label with no type expected -- the general form the typed getters specialize. The
     // item lands where `Item` reads it, so the answer is an `Item` rather than a value.
     get_item_in_map(self, label: string) -> Result[Item, Error]
-        val err = c_get_item_in_map(self.handle, lk_text, 0, first(label.bytes), label.bytes.len)
+        val err = c_get_item_in_map(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len)
 
         if err == 0 then Ok(Item(self)) else Err(Error(err))
     end get_item_in_map
@@ -1617,7 +1619,7 @@ struct ItemList
     // is what a caller who will inspect the kind themselves wants.
     want(self, label: string, expected: ItemKind) -> Result[unit, string]
         val b = label.bytes
-        val code = c_items_want(self.handle, first(b), b.len, int(expected))
+        val code = c_items_want(self.handle, as_ptr(b), b.len, int(expected))
 
         if code == 0 then Ok(())
         elif code == 1 then Err("this list already holds as many labels as it can")
@@ -2048,7 +2050,7 @@ end decoder
 decoder_with_storage(storage: []u64, input: []const u8, mode: DecodeMode) -> Result[Decoder, string]
     require storage.len > 0, "a decoder needs storage; size it with decoder_words()"
 
-    val ctx = c_decoder_init(&storage[0], storage.len, first(input), input.len, mode_number(mode))
+    val ctx = c_decoder_init(&storage[0], storage.len, as_ptr(input), input.len, mode_number(mode))
 
     if ctx == null then
         Err("the storage for a decoder is too small; size it with decoder_words()")
@@ -2061,24 +2063,6 @@ end decoder_with_storage
 // ==================================================================================================
 
 private flag(b: bool) -> int = if b then 1 else 0
-
-// A pointer to the first byte, or to a byte nothing will read.
-//
-// **An empty string is a real input** -- CBOR encodes `""` as one byte and `h''` as another -- and
-// `&b[0]` on an empty slice is an out-of-bounds index, so it traps rather than yielding the null
-// pointer C would accept. C never dereferences the scratch: every call passes the real length beside
-// the pointer, and a length of zero is a loop that does not run.
-private first(b: []const u8) -> *u8
-    var scratch: [1]u8
-
-    if b.len == 0 then &scratch[0] else &b[0]
-end first
-
-private first_mut(b: []u8) -> *u8
-    var scratch: [1]u8
-
-    if b.len == 0 then &scratch[0] else &b[0]
-end first_mut
 
 // Decode a NUL-terminated string from C, falling back where the bytes are not UTF-8.
 //
