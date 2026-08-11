@@ -84,16 +84,39 @@ an_encoder_outlives_the_function_that_made_it() =
     assert(done(e, out) == "820102", "[1, 2] survives its constructor")
 
 // The storage a caller supplies is the allocator-free path, and it must reach the same bytes.
+//
+// **`[encode_words]u64` is a fixed-size array in this frame rather than a slice off the heap** --
+// which is the whole reason that size is a `c const` and not a shim function. An array's length has
+// to be a constant, so while `encode_words` was something to *call*, a program with no allocator
+// could only transcribe a number that was right on one machine. This is the shape an embedded caller
+// writes, and nothing else here would notice if it stopped compiling.
 @test
 an_encoder_can_be_given_its_own_storage() =
-    var storage: []u64 = [0; encode_words()]
-    var out: []u8 = [0; 32]
+    var storage: [encode_words]u64 = [0; encode_words]
+    var out: [32]u8 = [0; 32]
 
-    encoder_with_storage(storage, out) match
+    encoder_with_storage(storage[0..<encode_words], out[0..<32]) match
         Err(why) -> assert(false, why)
         Ok(e) ->
             e.add_int(1)
-            assert(done(e, out) == "01", "1")
+            assert(done(e, out[0..<32]) == "01", "1")
+
+// The same for the decoder, whose storage holds QCBOR's context and the item slot together. Its size
+// is `sizeof` a structure declared in `shim.h`, and that header exists for no other reason: a `c
+// const` is compiled outside the shim, so it has to be able to name what it measures.
+@test
+a_decoder_can_be_given_its_own_storage() =
+    var storage: [decoder_words]u64 = [0; decoder_words]
+
+    assert(decoder_words > encode_words, "a decoder carries an item slot as well as the context")
+
+    decoder_with_storage(storage[0..<decoder_words], unhex("83010203"), Normal) match
+        Err(why) -> assert(false, why)
+        Ok(d) ->
+            var head = d.next().unwrap()
+
+            assert(head.kind() == Array, "an array")
+            assert(is_count(head, 3), "of three members")
 
 // Storage shorter than the context needs is refused rather than written past.
 @test
@@ -300,11 +323,11 @@ encodes_the_indefinite_length_forms() =
 @test
 encodes_the_tagged_types_from_the_specification() =
     var b16 = (e: Encoder) ->
-        e.add_tag(tag_enc_as_b16())
+        e.add_tag(tag_enc_as_b16)
         e.add_bytes(unhex("01020304"))
 
     var nested_cbor = (e: Encoder) ->
-        e.add_tag(tag_cbor())
+        e.add_tag(tag_cbor)
         e.add_bytes(unhex("6449455446"))
 
     check("c074323031332d30332d32315432303a30343a30305a", "0(\"2013-03-21T20:04:00Z\")",
@@ -353,25 +376,25 @@ a_borrowed_tag_writes_the_content_alone() =
 // specification and the CBOR registry fix.
 @test
 the_registered_tag_numbers_are_what_the_registry_says() =
-    assert(tag_date_string() == 0, "tag 0 is an RFC 3339 date string")
-    assert(tag_date_epoch() == 1, "tag 1 is an epoch date")
-    assert(tag_pos_bignum() == 2, "tag 2 is a positive bignum")
-    assert(tag_neg_bignum() == 3, "tag 3 is a negative bignum")
-    assert(tag_decimal_fraction() == 4, "tag 4 is a decimal fraction")
-    assert(tag_bigfloat() == 5, "tag 5 is a big float")
-    assert(tag_enc_as_b64url() == 21, "tag 21 is expected-base64url")
-    assert(tag_enc_as_b64() == 22, "tag 22 is expected-base64")
-    assert(tag_enc_as_b16() == 23, "tag 23 is expected-base16")
-    assert(tag_cbor() == 24, "tag 24 is encoded CBOR")
-    assert(tag_uri() == 32, "tag 32 is a URI")
-    assert(tag_b64url() == 33, "tag 33 is base64url")
-    assert(tag_b64() == 34, "tag 34 is base64")
-    assert(tag_regex() == 35, "tag 35 is a regular expression")
-    assert(tag_mime() == 36, "tag 36 is a MIME message")
-    assert(tag_bin_uuid() == 37, "tag 37 is a binary UUID")
-    assert(tag_days_epoch() == 100, "tag 100 is an epoch day count")
-    assert(tag_days_string() == 1004, "tag 1004 is a full-date string")
-    assert(tag_cbor_magic() == 55799, "tag 55799 is the self-describing prefix")
+    assert(tag_date_string == 0, "tag 0 is an RFC 3339 date string")
+    assert(tag_date_epoch == 1, "tag 1 is an epoch date")
+    assert(tag_pos_bignum == 2, "tag 2 is a positive bignum")
+    assert(tag_neg_bignum == 3, "tag 3 is a negative bignum")
+    assert(tag_decimal_fraction == 4, "tag 4 is a decimal fraction")
+    assert(tag_bigfloat == 5, "tag 5 is a big float")
+    assert(tag_enc_as_b64url == 21, "tag 21 is expected-base64url")
+    assert(tag_enc_as_b64 == 22, "tag 22 is expected-base64")
+    assert(tag_enc_as_b16 == 23, "tag 23 is expected-base16")
+    assert(tag_cbor == 24, "tag 24 is encoded CBOR")
+    assert(tag_uri == 32, "tag 32 is a URI")
+    assert(tag_b64url == 33, "tag 33 is base64url")
+    assert(tag_b64 == 34, "tag 34 is base64")
+    assert(tag_regex == 35, "tag 35 is a regular expression")
+    assert(tag_mime == 36, "tag 36 is a MIME message")
+    assert(tag_bin_uuid == 37, "tag 37 is a binary UUID")
+    assert(tag_days_epoch == 100, "tag 100 is an epoch day count")
+    assert(tag_days_string == 1004, "tag 1004 is a full-date string")
+    assert(tag_cbor_magic == 55799, "tag 55799 is the self-describing prefix")
 
 // ==================================================================================================
 // Errors
@@ -565,7 +588,7 @@ encoded_bytes_are_spliced_in_unchanged() =
 a_head_can_be_encoded_on_its_own() =
     var out: []u8 = [0; 16]
 
-    assert(head_max() >= 9, "a head is at most nine or ten bytes")
+    assert(head_max >= 9, "a head is at most nine or ten bytes")
 
     // Major type 0 is an unsigned integer; a minimum length of 0 lets QCBOR pick the shortest form.
     encode_head(out, 0, 0, 1000000) match
@@ -1433,7 +1456,7 @@ a_pool_joins_the_chunks_of_an_indefinite_string() =
     var d = decoder(unhex("7f657374726561646d696e67ff"), Normal)
     var pool: []u8 = [0; 256]
 
-    assert(pool.len > mem_pool_overhead(), "the pool must exceed QCBOR's own bookkeeping")
+    assert(pool.len > mem_pool_overhead, "the pool must exceed QCBOR's own bookkeeping")
 
     d.set_mem_pool(pool, false) match
         Err(e) -> assert(false, e.message())

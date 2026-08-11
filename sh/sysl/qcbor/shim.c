@@ -15,9 +15,13 @@
  *     in registers by the C ABI has no sysl spelling, so every one of them is
  *     split into a pointer and a length here.
  *   - **The constants are `#define`s.** `QCBOR_TYPE_TEXT_STRING`,
- *     `CBOR_TAG_DATE_EPOCH`, `QCBOR_ERR_NO_MORE_ITEMS` and the rest have no
- *     symbols. They are read from the headers here rather than copied into
- *     sysl as the numbers one machine happened to use.
+ *     `QCBOR_ERR_NO_MORE_ITEMS` and the rest have no symbols. The ones that
+ *     become a *value* on the sysl side -- the tag numbers, the two context
+ *     sizes, the limits -- are read by a `c const` block in `qcbor.sysl`
+ *     instead, which asks the C compiler the same question and gets an answer
+ *     a call cannot give: one that can size an array. What is left here is the
+ *     translation of QCBOR's sparse numbering into sysl's dense enums, which is
+ *     a `switch` rather than a constant.
  *
  * ==The two contexts are the caller's storage, and they may not be moved==
  *
@@ -33,12 +37,13 @@
  * and why the storage is `[]u64`: alignment is 8 and a `[]u8` does not promise
  * it.
  *
- * The size comes from `sizeof` here rather than from a number written in sysl,
- * and the check that the caller's storage is big enough is made here too, for
- * the same reason: `15 § 7` is explicit that a transcribed size compiles
- * everywhere and is correct on one machine.
+ * The size a caller must supply is a `c const` in `qcbor.sysl` rather than a
+ * number written there, and the check that the storage is big enough is made
+ * here as well: `15 § 7` is explicit that a transcribed size compiles everywhere
+ * and is correct on one machine.
  */
-#include "qcbor.h"
+#include "shim.h"
+
 #include "qcbor_spiffy_decode.h"
 
 #include <string.h>
@@ -47,18 +52,13 @@
  * Storage
  * ===================================================================== */
 
-/* How many 64-bit words a context needs. The caller sizes an array with this
- * rather than being told a number that was right when somebody wrote it down.
- */
-size_t sysl_qcbor_encode_words(void) {
-    return (sizeof(QCBOREncodeContext) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
-}
-
-/* The decoder's own storage is `sysl_qcbor_decoder_words`, further down, because
- * what it sizes is a wrapper holding the context *and* the item slot rather than
- * the context alone. There is deliberately no second entry point for a bare
- * QCBORDecodeContext: an item has to live somewhere, and one place to put it is
- * better than two.
+/* How many 64-bit words each context needs is a `c const` in `qcbor.sysl`, asked
+ * of the C compiler directly rather than reported through a call here. Both are
+ * a `sizeof` divided by eight: `QCBOREncodeContext` for the encoder, and
+ * `SyslDecoder` -- the context and the item slot together -- for the decoder.
+ *
+ * There is deliberately no second size for a bare `QCBORDecodeContext`: an item
+ * has to live somewhere, and one place to put it is better than two.
  */
 
 /* Initialize an encoding context in the caller's storage, over the caller's
@@ -596,104 +596,22 @@ size_t sysl_qcbor_encode_head(uint8_t *out, size_t out_len, uint8_t major_type,
     return head.len;
 }
 
-/* The number of bytes a head can take, so a caller can size a buffer for the
- * function above without transcribing QCBOR_HEAD_BUFFER_SIZE.
- */
-size_t sysl_qcbor_encode_head_max(void) { return QCBOR_HEAD_BUFFER_SIZE; }
-
-/* ===================================================================== *
- * Tag numbers
- *
- * These are protocol constants -- RFC 8949 and the CBOR tag registry fix them
- * for all time -- but they are still `#define`s, so they have no symbol and
- * `extern` has nothing to name. Read from the header here for the reason
- * `15 § 7` gives: a number transcribed into sysl compiles everywhere and is
- * correct wherever it happened to be copied from.
- * ===================================================================== */
-
-uint64_t sysl_qcbor_tag_date_string(void)      { return CBOR_TAG_DATE_STRING; }
-uint64_t sysl_qcbor_tag_date_epoch(void)       { return CBOR_TAG_DATE_EPOCH; }
-uint64_t sysl_qcbor_tag_pos_bignum(void)       { return CBOR_TAG_POS_BIGNUM; }
-uint64_t sysl_qcbor_tag_neg_bignum(void)       { return CBOR_TAG_NEG_BIGNUM; }
-uint64_t sysl_qcbor_tag_decimal_fraction(void) { return CBOR_TAG_DECIMAL_FRACTION; }
-uint64_t sysl_qcbor_tag_bigfloat(void)         { return CBOR_TAG_BIGFLOAT; }
-uint64_t sysl_qcbor_tag_cose_encrypt0(void)    { return CBOR_TAG_COSE_ENCRYPT0; }
-uint64_t sysl_qcbor_tag_cose_mac0(void)        { return CBOR_TAG_COSE_MAC0; }
-uint64_t sysl_qcbor_tag_cose_sign1(void)       { return CBOR_TAG_COSE_SIGN1; }
-uint64_t sysl_qcbor_tag_enc_as_b64url(void)    { return CBOR_TAG_ENC_AS_B64URL; }
-uint64_t sysl_qcbor_tag_enc_as_b64(void)       { return CBOR_TAG_ENC_AS_B64; }
-uint64_t sysl_qcbor_tag_enc_as_b16(void)       { return CBOR_TAG_ENC_AS_B16; }
-uint64_t sysl_qcbor_tag_cbor(void)             { return CBOR_TAG_CBOR; }
-uint64_t sysl_qcbor_tag_uri(void)              { return CBOR_TAG_URI; }
-uint64_t sysl_qcbor_tag_b64url(void)           { return CBOR_TAG_B64URL; }
-uint64_t sysl_qcbor_tag_b64(void)              { return CBOR_TAG_B64; }
-uint64_t sysl_qcbor_tag_regex(void)            { return CBOR_TAG_REGEX; }
-uint64_t sysl_qcbor_tag_mime(void)             { return CBOR_TAG_MIME; }
-uint64_t sysl_qcbor_tag_bin_uuid(void)         { return CBOR_TAG_BIN_UUID; }
-uint64_t sysl_qcbor_tag_cwt(void)              { return CBOR_TAG_CWT; }
-uint64_t sysl_qcbor_tag_cbor_sequence(void)    { return CBOR_TAG_CBOR_SEQUENCE; }
-uint64_t sysl_qcbor_tag_cose_encrypt(void)     { return CBOR_TAG_COSE_ENCRYPT; }
-uint64_t sysl_qcbor_tag_cose_mac(void)         { return CBOR_TAG_COSE_MAC; }
-uint64_t sysl_qcbor_tag_cose_sign(void)        { return CBOR_TAG_COSE_SIGN; }
-uint64_t sysl_qcbor_tag_days_epoch(void)       { return CBOR_TAG_DAYS_EPOCH; }
-uint64_t sysl_qcbor_tag_geo_coord(void)        { return CBOR_TAG_GEO_COORD; }
-uint64_t sysl_qcbor_tag_binary_mime(void)      { return CBOR_TAG_BINARY_MIME; }
-uint64_t sysl_qcbor_tag_days_string(void)      { return CBOR_TAG_DAYS_STRING; }
-uint64_t sysl_qcbor_tag_cbor_magic(void)       { return CBOR_TAG_CBOR_MAGIC; }
-uint64_t sysl_qcbor_tag_invalid64(void)        { return CBOR_TAG_INVALID64; }
 
 /* ===================================================================== *
  * Decoding
  *
  * ==The decoder is a context and one item, and they travel together==
  *
- * `QCBORItem` is a struct with two unions and a tag array, and it comes back
- * *by value* from every function that produces one. sysl can neither lay it out
- * nor receive it, and passing its two dozen fields back through out-parameters
- * would be a call with two dozen arguments that grew every time QCBOR added a
- * type.
+ * `SyslDecoder` is in `shim.h` rather than here, because `qcbor.sysl` measures
+ * `sizeof` it in a `c const` block and a constant is compiled outside this file.
+ * The comment explaining what it is and why it may not be moved is there with
+ * it.
  *
- * So the item lives here, beside the context, in one wrapper the sysl side holds
- * a pointer to. A decode writes into `item`, and the accessors below read the
- * field the caller asks for. That also makes the storage question the same one
- * the encoder already answered: `sysl_qcbor_decode_words` reports the size of
- * the *wrapper*, and the caller supplies it.
- *
- * The consequence worth knowing is that **there is one item slot**, so the next
- * decode overwrites the last one -- which is what QCBOR's own model does anyway,
- * since the strings it hands back point into the input rather than into the
- * item.
+ * The consequence worth knowing on this side is that **there is one item slot**,
+ * so the next decode overwrites the last one -- which is what QCBOR's own model
+ * does anyway, since the strings it hands back point into the input rather than
+ * into the item.
  * ===================================================================== */
-
-/* A caller's own string allocator, in the shape sysl can express.
- *
- * QCBOR's `QCBORStringAllocate` returns a `UsefulBuf` **by value**, and sysl has
- * no spelling for that -- a `*extern` can be called with C's convention, but the
- * type it returns has to be one sysl can name, and a two-word aggregate whose
- * layout is C's is exactly what `15 § 7` says not to transcribe.
- *
- * So the sysl side's allocator answers through out-parameters instead, and
- * `allocator_thunk` below is the C function QCBOR actually gets. Non-zero from
- * the sysl side means the allocation failed, which becomes the NULL buffer
- * QCBOR reads as failure.
- */
-typedef int (*SyslAllocate)(void *ctx, uint8_t *old_mem, size_t new_size,
-                            uint8_t **out_ptr, size_t *out_len);
-
-typedef struct {
-    QCBORDecodeContext ctx;
-    QCBORItem          item;
-    /* The caller's allocator, if one was installed. It lives here rather than in
-     * a static because a program may be decoding two things at once, and because
-     * QCBOR takes one `void *` of context and this is what has to be behind it.
-     */
-    SyslAllocate       allocate;
-    void              *allocate_ctx;
-} SyslDecoder;
-
-size_t sysl_qcbor_decoder_words(void) {
-    return (sizeof(SyslDecoder) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
-}
 
 /* The decode modes, whose values are an enum in the header rather than macros --
  * but crossing them as a small dense integer chosen here keeps sysl from
@@ -871,14 +789,12 @@ double   sysl_qcbor_item_double(const SyslDecoder *d) { return d->item.val.dfnum
 float    sysl_qcbor_item_float(const SyslDecoder *d)  { return d->item.val.fnum; }
 uint8_t  sysl_qcbor_item_simple(const SyslDecoder *d) { return d->item.val.uSimple; }
 
-/* An array's or a map's member count. UINT16_MAX means indefinite length, which
- * the sysl side turns into `None` rather than a number nothing should read.
+/* An array's or a map's member count. The sentinel meaning "indefinite length"
+ * is `QCBOR_COUNT_INDICATES_INDEFINITE_LENGTH`, which `qcbor.sysl` reads as a
+ * `c const` and compares against directly -- so the sysl side turns it into
+ * `None` rather than reporting a number nothing should read.
  */
 uint16_t sysl_qcbor_item_count(const SyslDecoder *d) { return d->item.val.uCount; }
-
-int sysl_qcbor_count_is_indefinite(uint16_t count) {
-    return count == QCBOR_COUNT_INDICATES_INDEFINITE_LENGTH ? 1 : 0;
-}
 
 /* A string value, or a bignum, which share the `string`/`bigNum` union member.
  * The pointer is **into the input buffer**, not into the item, so it stays valid
@@ -947,11 +863,6 @@ uint64_t sysl_qcbor_item_tag(SyslDecoder *d, uint32_t index) {
 uint64_t sysl_qcbor_last_tag(SyslDecoder *d, uint32_t index) {
     return QCBORDecode_GetNthTagOfLast(&d->ctx, index);
 }
-
-/* How many tags an item can carry, so a caller can bound a loop without
- * transcribing QCBOR_MAX_TAGS_PER_ITEM.
- */
-uint32_t sysl_qcbor_max_tags_per_item(void) { return QCBOR_MAX_TAGS_PER_ITEM; }
 
 /* -- Position, errors and finishing --------------------------------------- */
 
@@ -1068,9 +979,6 @@ void sysl_qcbor_decode_set_allocator(SyslDecoder *d, SyslAllocate fn, void *ctx,
 
     QCBORDecode_SetUpAllocator(&d->ctx, allocator_thunk, d, all_strings ? true : false);
 }
-
-/* The smallest pool QCBOR will accept, which is its own bookkeeping overhead. */
-size_t sysl_qcbor_mem_pool_overhead(void) { return QCBOR_DECODE_MIN_MEM_POOL_SIZE; }
 
 /* ===================================================================== *
  * Spiffy decode

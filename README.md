@@ -17,14 +17,22 @@ put a heap under it would have thrown that away.
 
 ```
 sh/sysl/qcbor/
-    qcbor.sysl          the binding
+    qcbor.sysl          errors, the RFC 8949 tag numbers, the shared helpers
+    encode.sysl         `Encoder`
+    decode.sysl         `Decoder` — traversal and the bounded getters
+    item.sysl           `Item`, and the values read out of one
     shim.c              the C that only C can reach
-    tests.sysl          86 tests, mostly against RFC 8949's own table
+    shim.h              the one declaration a `c const` block has to be able to name
+    tests.sysl          89 tests, mostly against RFC 8949's own table
     qcbor_encode.c      vendored from laurencelundblade/QCBOR v1.6.1
     qcbor_decode.c
     UsefulBuf.c  ieee754.c  qcbor_err_to_str.c  and their headers
 package.hocon           who this package is, and what it needs of the machine
 ```
+
+**The four `.sysl` files are one module**, all declaring `module sh.sysl.qcbor`, so the split is
+invisible to anything importing it. What decided the boundaries is that a struct's methods live in
+its declaration: `Encoder`, `Decoder` and `Item` are each too large to share a file with another.
 
 The module is **`sh.sysl.qcbor`**, and the three directories are that name: a dotted module name
 mirrors its path from the library root. The prefix is the reverse-DNS of `sysl.sh`, so that a package
@@ -89,6 +97,26 @@ are inline and identical to writing the label and then the value. So this bindin
 
 **Give `encoder` an empty buffer and it counts instead of writing**, which is how you size a buffer
 before making one: `finish_get_size()` then reports what the same calls would have taken.
+
+## With no allocator at all
+
+`encoder` makes the context's storage for you, which means a heap. A program that has none supplies
+it instead, and **the size is a constant rather than something to call**, so it can be the length of
+an ordinary array:
+
+```sysl
+var storage: [encode_words]u64 = [0; encode_words]
+var out: [32]u8 = [0; 32]
+
+encoder_with_storage(storage[0..<encode_words], out[0..<32]) match
+    Err(why) -> ...
+    Ok(e) -> ...
+```
+
+`decoder_with_storage` and `decoder_words` are the same on the other side. Both numbers are `sizeof`
+divided by eight, asked of the C compiler at build time in a `c const` block — so they are the
+target's answer and not the machine the binding was written on, and unlike a shim function reporting
+one they are constants, which is what an array's length has to be.
 
 ## Decoding, two ways
 

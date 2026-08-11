@@ -1,0 +1,470 @@
+module sh.sysl.qcbor
+@include("shim.h")
+
+import sysl.slices.{as_ptr, as_mut_ptr}
+
+// Encoding: `Encoder`, and the head of a data item on its own.
+//
+// One of four files declaring `module sh.sysl.qcbor`; `qcbor.sysl` says what the others hold.
+//
+// **No method on `Encoder` reports an error.** QCBOR remembers the first failure and turns every
+// later call into a no-op, so a caller checks once at `finish` rather than after each of forty
+// calls -- which is what makes a long encoding sequence readable.
+
+// The encoding context. QCBOR never allocates: a context is storage the caller supplies, and this is
+// a pointer into that storage. Bodyless because nothing in sysl lays one out -- the size is
+// `sizeof(QCBOREncodeContext)` and only the C knows it (`15 §9`).
+opaque struct EncodeCtx
+
+extern "sysl_qcbor_encode_init" c_encode_init(storage: *u64, words: usize, out: *u8,
+                                              out_len: usize) -> *EncodeCtx
+
+extern "sysl_qcbor_encode_add_int64" c_add_int64(ctx: *EncodeCtx, v: long)
+extern "sysl_qcbor_encode_add_uint64" c_add_uint64(ctx: *EncodeCtx, v: ulong)
+extern "sysl_qcbor_encode_add_double" c_add_double(ctx: *EncodeCtx, v: real)
+extern "sysl_qcbor_encode_add_float" c_add_float(ctx: *EncodeCtx, v: f32)
+extern "sysl_qcbor_encode_add_double_no_preferred" c_add_double_np(ctx: *EncodeCtx, v: real)
+extern "sysl_qcbor_encode_add_float_no_preferred" c_add_float_np(ctx: *EncodeCtx, v: f32)
+
+extern "sysl_qcbor_encode_add_text" c_add_text(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_bytes" c_add_bytes(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_bytes_len_only" c_add_bytes_len_only(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_open_bytes" c_open_bytes(ctx: *EncodeCtx, place: **u8, place_len: *usize)
+extern "sysl_qcbor_encode_close_bytes" c_close_bytes(ctx: *EncodeCtx, amount: usize)
+
+extern "sysl_qcbor_encode_add_bool" c_add_bool(ctx: *EncodeCtx, b: int)
+extern "sysl_qcbor_encode_add_null" c_add_null(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_undef" c_add_undef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_simple" c_add_simple(ctx: *EncodeCtx, v: u8)
+
+extern "sysl_qcbor_encode_add_tag" c_add_tag(ctx: *EncodeCtx, tag: u64)
+extern "sysl_qcbor_encode_add_date_epoch" c_add_date_epoch(ctx: *EncodeCtx, tagged: int, v: long)
+extern "sysl_qcbor_encode_add_days_epoch" c_add_days_epoch(ctx: *EncodeCtx, tagged: int, v: long)
+extern "sysl_qcbor_encode_add_date_string" c_add_date_string(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_days_string" c_add_days_string(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_binary_uuid" c_add_binary_uuid(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_positive_bignum" c_add_pos_bignum(ctx: *EncodeCtx, tagged: int,
+                                                                p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_negative_bignum" c_add_neg_bignum(ctx: *EncodeCtx, tagged: int,
+                                                                p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_decimal_fraction" c_add_decimal_fraction(ctx: *EncodeCtx, tagged: int,
+                                                                       mantissa: long,
+                                                                       exponent: long)
+extern "sysl_qcbor_encode_add_decimal_fraction_bignum" c_add_decimal_fraction_big(
+    ctx: *EncodeCtx, tagged: int, p: *u8, n: usize, negative: int, exponent: long)
+extern "sysl_qcbor_encode_add_big_float" c_add_big_float(ctx: *EncodeCtx, tagged: int,
+                                                         mantissa: long, exponent: long)
+extern "sysl_qcbor_encode_add_big_float_bignum" c_add_big_float_big(
+    ctx: *EncodeCtx, tagged: int, p: *u8, n: usize, negative: int, exponent: long)
+extern "sysl_qcbor_encode_add_uri" c_add_uri(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_b64_text" c_add_b64(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_b64url_text" c_add_b64url(ctx: *EncodeCtx, tagged: int,
+                                                        p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_regex" c_add_regex(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_mime_data" c_add_mime(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+
+extern "sysl_qcbor_encode_open_array" c_open_array(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_array" c_close_array(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_map" c_open_map(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_map" c_close_map(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_array_indefinite" c_open_array_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_array_indefinite" c_close_array_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_map_indefinite" c_open_map_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_map_indefinite" c_close_map_indef(ctx: *EncodeCtx)
+
+extern "sysl_qcbor_encode_bstr_wrap" c_bstr_wrap(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_bstr_wrap" c_close_bstr_wrap(ctx: *EncodeCtx, include_head: int,
+                                                             offset: *usize, len: *usize)
+extern "sysl_qcbor_encode_cancel_bstr_wrap" c_cancel_bstr_wrap(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_encoded" c_add_encoded(ctx: *EncodeCtx, p: *u8, n: usize)
+
+extern "sysl_qcbor_encode_finish" c_encode_finish(ctx: *EncodeCtx, len: *usize) -> int
+extern "sysl_qcbor_encode_finish_get_size" c_encode_finish_size(ctx: *EncodeCtx, len: *usize) -> int
+extern "sysl_qcbor_encode_get_error" c_encode_get_error(ctx: *EncodeCtx) -> int
+extern "sysl_qcbor_encode_is_buffer_null" c_encode_is_buffer_null(ctx: *EncodeCtx) -> int
+extern "sysl_qcbor_encode_tell" c_encode_tell(ctx: *EncodeCtx) -> usize
+extern "sysl_qcbor_encode_substring" c_encode_substring(ctx: *EncodeCtx, start: usize,
+                                                        offset: *usize, len: *usize)
+extern "sysl_qcbor_encode_head" c_encode_head(out: *u8, out_len: usize, major: u8, min_len: u8,
+                                              number: u64) -> usize
+
+c const
+    // How many 64-bit words an encoding context needs. A caller sizes storage with this rather than
+    // with a number somebody wrote down: `15 §7` is explicit that a transcribed `sizeof` compiles
+    // everywhere and is correct on one machine.
+    //
+    // **Being a constant is what makes `[encode_words]u64` a legal array**, so a program with no
+    // heap at all can hold an encoder's storage in its own frame. That is the whole of why this is
+    // asked of the C compiler here rather than reported by a shim function.
+    encode_words: usize = "(sizeof(QCBOREncodeContext) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
+
+    // The most bytes `encode_head` can write, for sizing the buffer it is given.
+    head_max: usize = "QCBOR_HEAD_BUFFER_SIZE"
+
+// An encoder writing into a buffer the caller owns.
+//
+// **No method here reports an error.** QCBOR remembers the first failure and turns every later call
+// into a no-op, so a caller checks once at `finish` rather than after each of forty calls -- which is
+// the design that makes a long encoding sequence readable. `error` is there for a caller who wants to
+// stop early anyway.
+//
+// **A map is a flat sequence of items and its entries are pairs.** There is no `add_int_to_map`
+// family here because QCBOR's own is inline and identical to writing the label and then the value,
+// so `label` and `label_at` compose with *every* value below -- including the ones QCBOR never wrote
+// a labelled form for.
+struct Encoder
+    // **The storage is held here, and that is what makes the pointer beside it safe.** A QCBOR
+    // context lives in storage the caller supplies, and `handle` points into it -- so if the slice
+    // that storage came from were released while the encoder lived, every method below would write
+    // through a dangling pointer. Keeping the slice as a field means the encoder itself is what
+    // keeps it alive, so an `Encoder` may be returned from a function, put in a variable, or passed
+    // on, and the storage goes where it goes.
+    //
+    // A copy of an `Encoder` copies the *view*, not the words, so both copies drive the one context.
+    // That is the intended reading: an encoder is a position in a buffer, and there is only one.
+    storage: []u64
+    handle: *EncodeCtx
+
+    // -- Labels ------------------------------------------------------------------------------------
+
+    // A text label for the entry that follows. `e.label("age"); e.add_int(36)` is one map entry.
+    label(self, name: string) = self.add_text(name)
+
+    // An integer label, which is what a compact protocol uses in place of a name.
+    label_at(self, n: long) = self.add_int(n)
+
+    // -- Numbers -----------------------------------------------------------------------------------
+
+    // A signed integer, in the shortest CBOR form that holds it.
+    add_int(self, v: long) = c_add_int64(self.handle, v)
+
+    // An unsigned integer. Worth reaching for above 2^63, which `add_int` cannot express.
+    add_uint(self, v: ulong) = c_add_uint64(self.handle, v)
+
+    // A double, in the shortest form that holds its exact value -- so 1.0 becomes a two-byte
+    // half-precision item. This is RFC 8949's preferred serialization, and it is what a protocol
+    // wanting deterministic encoding needs.
+    add_double(self, v: real) = c_add_double(self.handle, v)
+
+    add_float(self, v: f32) = c_add_float(self.handle, v)
+
+    // The full eight and four bytes, without the shortening above. For a protocol that fixes the
+    // width, or a reader that cannot do half-precision.
+    add_double_exact(self, v: real) = c_add_double_np(self.handle, v)
+    add_float_exact(self, v: f32) = c_add_float_np(self.handle, v)
+
+    // -- Strings -----------------------------------------------------------------------------------
+
+    // A text string. CBOR text is UTF-8 and a sysl `string` already is, so nothing is validated here.
+    add_text(self, s: string)
+        val b = s.bytes
+
+        c_add_text(self.handle, as_ptr(b), b.len)
+    end add_text
+
+    // A byte string, which in CBOR is a different major type from text and not interchangeable.
+    add_bytes(self, b: []const u8) = c_add_bytes(self.handle, as_ptr(b), b.len)
+
+    // The head of a byte string with no content, for computing what an encoding would take without
+    // having the bytes.
+    add_bytes_len_only(self, b: []const u8) = c_add_bytes_len_only(self.handle, as_ptr(b), b.len)
+
+    // Open a byte string whose content is written into the output buffer directly, then say how much
+    // was written. This is what avoids a second copy when the content is produced by something that
+    // can write into a slice -- a hash, a cipher, a nested encoder.
+    //
+    // `None` when there is no room left, or when the encoder is only counting bytes.
+    open_bytes(self) -> Option[[]u8]
+        var place: *u8 = null
+        var n: usize = 0
+
+        c_open_bytes(self.handle, &place, &n)
+
+        if place == null || n == 0 then None else Some(place[0..<n])
+    end open_bytes
+
+    close_bytes(self, written: usize) = c_close_bytes(self.handle, written)
+
+    // -- Simple values -----------------------------------------------------------------------------
+
+    add_bool(self, b: bool) = c_add_bool(self.handle, if b then 1 else 0)
+
+    // CBOR's null and undefined are two different simple values, and a protocol that means "absent"
+    // should say which one it means.
+    add_null(self) = c_add_null(self.handle)
+    add_undef(self) = c_add_undef(self.handle)
+
+    // A simple value by number, for the ones CBOR has not named. 0 to 19 and 32 to 255 are available;
+    // 20 to 23 are false, true, null and undefined and have methods above.
+    add_simple(self, v: u8) = c_add_simple(self.handle, v)
+
+    // -- Tags --------------------------------------------------------------------------------------
+
+    // A tag number, applying to the item added next. The `tag_*` functions above name the registered
+    // ones; any number may be passed.
+    add_tag(self, tag: u64) = c_add_tag(self.handle, tag)
+
+    // The tagged types QCBOR knows how to write. **`tagged` chooses whether the tag number itself is
+    // written**: `true` produces a self-describing item, and `false` produces the content alone, for
+    // a protocol whose schema already says what the bytes are. QCBOR calls the second "borrowed".
+    add_date_epoch(self, seconds: long, tagged: bool) =
+        c_add_date_epoch(self.handle, flag(tagged), seconds)
+
+    add_days_epoch(self, days: long, tagged: bool) =
+        c_add_days_epoch(self.handle, flag(tagged), days)
+
+    add_date_string(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_date_string(self.handle, flag(tagged), as_ptr(b), b.len)
+    end add_date_string
+
+    add_days_string(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_days_string(self.handle, flag(tagged), as_ptr(b), b.len)
+    end add_days_string
+
+    add_binary_uuid(self, b: []const u8, tagged: bool) =
+        c_add_binary_uuid(self.handle, flag(tagged), as_ptr(b), b.len)
+
+    // An arbitrary-precision integer, big-endian, most significant byte first.
+    //
+    // **The negative form does not encode the magnitude.** RFC 8949 says the bytes of tag 3 encode
+    // -1 minus the value, so -1 is an empty or zero byte string and -256 is `ff`. Passing the
+    // magnitude produces a number one too large, and nothing will tell you.
+    add_positive_bignum(self, b: []const u8, tagged: bool) =
+        c_add_pos_bignum(self.handle, flag(tagged), as_ptr(b), b.len)
+
+    add_negative_bignum(self, b: []const u8, tagged: bool) =
+        c_add_neg_bignum(self.handle, flag(tagged), as_ptr(b), b.len)
+
+    // Mantissa times ten to the exponent, as tag 4 -- the way to carry a decimal amount without a
+    // binary float's rounding. `(273, -2)` is 2.73 exactly.
+    add_decimal_fraction(self, mantissa: long, exponent: long, tagged: bool) =
+        c_add_decimal_fraction(self.handle, flag(tagged), mantissa, exponent)
+
+    // The same with a mantissa too large for a `long`, which then has the sign convention of
+    // `add_negative_bignum` when `negative` is true.
+    add_decimal_fraction_bignum(self, mantissa: []const u8, negative: bool, exponent: long,
+                                tagged: bool) =
+        c_add_decimal_fraction_big(self.handle, flag(tagged), as_ptr(mantissa), mantissa.len,
+                                   flag(negative), exponent)
+
+    // Mantissa times two to the exponent, as tag 5.
+    add_big_float(self, mantissa: long, exponent: long, tagged: bool) =
+        c_add_big_float(self.handle, flag(tagged), mantissa, exponent)
+
+    add_big_float_bignum(self, mantissa: []const u8, negative: bool, exponent: long, tagged: bool) =
+        c_add_big_float_big(self.handle, flag(tagged), as_ptr(mantissa), mantissa.len,
+                            flag(negative), exponent)
+
+    add_uri(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_uri(self.handle, flag(tagged), as_ptr(b), b.len)
+    end add_uri
+
+    add_b64(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_b64(self.handle, flag(tagged), as_ptr(b), b.len)
+    end add_b64
+
+    add_b64url(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_b64url(self.handle, flag(tagged), as_ptr(b), b.len)
+    end add_b64url
+
+    add_regex(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_regex(self.handle, flag(tagged), as_ptr(b), b.len)
+    end add_regex
+
+    // A MIME message, headers and all, as tag 36.
+    add_mime(self, s: string, tagged: bool)
+        val b = s.bytes
+
+        c_add_mime(self.handle, flag(tagged), as_ptr(b), b.len)
+    end add_mime
+
+    // -- Structure ---------------------------------------------------------------------------------
+
+    // An array, whose length CBOR writes once the close tells QCBOR what it is. Everything added
+    // between the two is an element.
+    open_array(self) = c_open_array(self.handle)
+    close_array(self) = c_close_array(self.handle)
+
+    // A map, whose entries are the label/value pairs added between the two.
+    //
+    // **A label with no value is not caught, and the output is silently wrong.** QCBOR counts the
+    // items between the two calls and writes *half* that as the entry count, rounding down, so a map
+    // holding one item encodes as `a0` -- an empty map -- with the orphaned item left sitting after
+    // it as a second top-level data item. `finish` reports success. This was measured, not assumed:
+    // `a_dangling_label_is_not_caught` in `tests.sysl` pins the bytes.
+    //
+    // Nothing here defends against it, because a binding that counted items would be a second
+    // implementation of the nesting bookkeeping and would disagree with QCBOR's own somewhere. What
+    // it costs is a rule the caller has to keep: **every `label` is followed by exactly one value**.
+    open_map(self) = c_open_map(self.handle)
+    close_map(self) = c_close_map(self.handle)
+
+    // The indefinite-length forms, which write a break byte instead of a count. Worth the extra byte
+    // only when the length genuinely is not known in advance -- a stream being forwarded as it
+    // arrives. **RFC 8949's deterministic encoding forbids them**, so a protocol that hashes its CBOR
+    // wants the definite forms above.
+    open_array_indefinite(self) = c_open_array_indef(self.handle)
+    close_array_indefinite(self) = c_close_array_indef(self.handle)
+    open_map_indefinite(self) = c_open_map_indef(self.handle)
+    close_map_indefinite(self) = c_close_map_indef(self.handle)
+
+    // A byte string whose content is itself CBOR -- how COSE carries a payload whose exact bytes are
+    // signed. Everything encoded between the two calls becomes the content.
+    bstr_wrap(self) = c_bstr_wrap(self.handle)
+
+    // Close it, answering where the wrapped bytes sit in the output buffer. The answer is an offset
+    // and a length rather than a slice because the buffer is the caller's and slicing it here would
+    // hand back a second view of storage they already hold.
+    //
+    // `include_head` decides whether the byte string's own head is part of the answer, which is what
+    // a caller hashing the wrapped CBOR needs to choose.
+    close_bstr_wrap(self, include_head: bool) -> Span
+        var offset: usize = 0
+        var n: usize = 0
+
+        c_close_bstr_wrap(self.handle, flag(include_head), &offset, &n)
+        Span(offset, n)
+    end close_bstr_wrap
+
+    // Abandon a `bstr_wrap`, discarding what was written inside it. For a caller who discovers the
+    // wrapped content was not needed after all.
+    cancel_bstr_wrap(self) = c_cancel_bstr_wrap(self.handle)
+
+    // Splice in bytes that are already CBOR, without checking them. Whatever is passed becomes part
+    // of the output as-is, so it had better be well-formed and exactly one data item.
+    add_encoded(self, b: []const u8) = c_add_encoded(self.handle, as_ptr(b), b.len)
+
+    // -- Finishing and inspection ------------------------------------------------------------------
+
+    // How many bytes were written. The error is the first one QCBOR met anywhere in the sequence.
+    finish(self) -> Result[usize, Error]
+        var n: usize = 0
+        val err = c_encode_finish(self.handle, &n)
+
+        if err == 0 then Ok(n) else Err(Error(err))
+    end finish
+
+    // The same, for an encoder that was given no buffer and is only counting.
+    finish_get_size(self) -> Result[usize, Error]
+        var n: usize = 0
+        val err = c_encode_finish_size(self.handle, &n)
+
+        if err == 0 then Ok(n) else Err(Error(err))
+    end finish_get_size
+
+    // The first failure so far, or `None`. For stopping a long sequence early rather than at `finish`.
+    error(self) -> Option[Error]
+        val err = c_encode_get_error(self.handle)
+
+        if err == 0 then None else Some(Error(err))
+    end error
+
+    // Whether this encoder is only counting bytes, having been given an empty output buffer.
+    counting_only(self) -> bool = c_encode_is_buffer_null(self.handle) != 0
+
+    // How many bytes have been written so far, which is the offset a later `substring` starts from.
+    tell(self) -> usize = c_encode_tell(self.handle)
+
+    // Where the bytes written since `start` sit in the output buffer. The pair with `tell`: record a
+    // position, encode some items, then ask what they came to.
+    //
+    // **Nothing that was open when `tell` was called may have closed before this span is read.**
+    // QCBOR writes a definite-length head only when the array or map closes, and *inserts* it at the
+    // position where the open happened -- so every byte after that point shifts along by the head's
+    // length, and a span taken earlier now names the wrong bytes. QCBOR cannot catch the mistake: its
+    // own source says the offset alone does not carry enough information to tell whether `Tell` came
+    // before or after an `Open`.
+    //
+    // The safe shapes are the two where nothing shifts: mark and read at the same nesting level with
+    // no close between them, or read after the enclosing structure has been closed.
+    substring(self, start: usize) -> Span
+        var offset: usize = 0
+        var n: usize = 0
+
+        c_encode_substring(self.handle, start, &offset, &n)
+        Span(offset, n)
+    end substring
+end Encoder
+
+// A region of the output buffer, as an offset and a length.
+//
+// An offset rather than a slice because the buffer belongs to the caller: handing back a `[]u8` would
+// be a second view of storage they are already holding, and sysl would then have two names for one
+// piece of memory with no way to say they are the same. `buf[s.offset..<s.offset + s.len]` is the
+// slice, made where the buffer is in scope.
+struct Span
+    offset: usize
+    len: usize
+end Span
+
+// Start encoding into `out`.
+//
+// The context's storage is made here and held by the encoder, so there is nothing for a caller to
+// size, keep alive, or pass around beside it. **`out` is the caller's and is not copied** -- the
+// encoder writes into it directly, which is the whole point of a CBOR encoder that allocates nothing
+// per item.
+//
+// **An empty `out` is not an error -- it is QCBOR's size-calculation mode.** Nothing is written and
+// `finish_get_size` reports what the encoding would have taken, which is how a caller sizes a buffer
+// before making one.
+encoder(out: []u8) -> Encoder
+    var storage: []u64 = [0; encode_words]
+
+    // Cannot fail: the storage was just sized by asking C what it needs.
+    encoder_with_storage(storage, out).unwrap()
+end encoder
+
+// The same, for a program that will not allocate.
+//
+// `storage` must be at least `encode_words` long. Sizing it is the caller's only extra step, and
+// what it buys is an encoder with no heap behind it at all -- which is the position an embedded
+// program is in, and the one CBOR exists for.
+//
+// The slice is kept by the returned encoder, so it stays alive as long as the encoder does whatever
+// the caller then does with it.
+encoder_with_storage(storage: []u64, out: []u8) -> Result[Encoder, string]
+    require storage.len > 0, "an encoding context needs storage; size it with encode_words"
+
+    // **An empty buffer must reach C as a null pointer, not as a pointer to nothing.** QCBOR decides
+    // it is in size-calculation mode by testing the pointer rather than the length, so a pointer to
+    // any real byte would put the encoder into ordinary mode over a zero-length buffer and turn every
+    // write into `BufferTooSmall`. A test caught that.
+    //
+    // This line used to spell the empty case out by hand, because the private helper it would
+    // otherwise have called answered a scratch byte. `as_mut_ptr` answers `null`, so the general
+    // function is now the one this wants and the special case is gone.
+    val ctx = c_encode_init(&storage[0], storage.len, as_mut_ptr(out), out.len)
+
+    if ctx == null then
+        Err("the storage for an encoding context is too small; size it with encode_words")
+    else
+        Ok(Encoder(storage, ctx))
+end encoder_with_storage
+
+// The head of one data item -- its major type and argument, and nothing else -- written into `out`.
+// Answers how many bytes it took, or `None` when `out` is shorter than `head_max`.
+//
+// This is for a caller assembling CBOR around this binding rather than through it: computing a length
+// prefix for bytes another library will produce, or writing a streaming header by hand.
+encode_head(out: []u8, major_type: u8, min_len: u8, number: u64) -> Option[usize]
+    val n = c_encode_head(as_mut_ptr(out), out.len, major_type, min_len, number)
+
+    if n == 0 then None else Some(n)
+end encode_head
+
+// ==================================================================================================
