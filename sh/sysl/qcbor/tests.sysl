@@ -1171,7 +1171,7 @@ reads_a_decimal_fraction_with_a_wide_mantissa() =
 // `convert` is what accepts both without the caller branching.
 @test
 a_converting_getter_accepts_more_than_one_type() =
-    val accepted = convert_int() | convert_float()
+    val accepted = convert_int | convert_float
 
     var whole = decoder(unhex("03"), Normal)
     var fractional = decoder(unhex("f94200"), Normal)
@@ -1185,7 +1185,7 @@ a_converting_getter_accepts_more_than_one_type() =
 @test
 convert_all_evaluates_a_decimal_fraction() =
     var d = decoder(unhex("c48221196ab3"), Normal)
-    val accepted = convert_int() | convert_decimal_fraction()
+    val accepted = convert_int | convert_decimal_fraction
 
     val v = double_of(d.get_double_convert_all(accepted), -1.0)
 
@@ -1196,7 +1196,7 @@ convert_all_evaluates_a_decimal_fraction() =
 a_converting_getter_refuses_what_it_was_not_told_to_accept() =
     var d = decoder(unhex("f94200"), Normal)
 
-    assert(failed(d.get_int_convert(convert_int())), "a float is not in the accepted set")
+    assert(failed(d.get_int_convert(convert_int)), "a float is not in the accepted set")
 
 // ==================================================================================================
 // Bstr-wrapped CBOR, and subtrees as bytes
@@ -1284,7 +1284,7 @@ private refuse_unknown(ctx: *u8, item: *u8) -> int
     // Reached only for a label the list did not ask for, so its mere existence is the refusal.
     val ignored = staged(ctx, item)
 
-    callback_fail()
+    callback_fail
 end refuse_unknown
 
 // Nothing is left over, so the callback never fires and the read succeeds.
@@ -1324,7 +1324,7 @@ an_item_list_refuses_more_labels_than_it_holds() =
 
     var i: usize = 0
 
-    while i < items_capacity()
+    while i < items_capacity
         wanted.want_at(long(i), Unset)
         i = i + 1
 
@@ -1698,3 +1698,118 @@ the_readme_item_by_item_example_works() =
             item.kind() match
                 TextString -> assert(is_text(item, "IETF"), "a text string")
                 _ -> assert(false, "it is a text string")
+
+// ==================================================================================================
+// QCBOR's own numbering
+//
+// Three translation tables used to live in `shim.c`, each mapping a QCBOR constant onto a dense
+// ordinal that had to match the declaration order of an enum in another language, with nothing
+// comparing the two halves. They are `match`es against `sh.sysl.qcbor.c` now, so the C compiler
+// checks the names. What it cannot check is that the right *variant* is on the right side of an
+// arrow, which is what the tests below are for.
+// ==================================================================================================
+
+// The one QCBOR value that is not a number a caller can read back out of anything: a tag
+// requirement travels only inwards, so the numbers are pinned here rather than measured.
+@test("a tag requirement carries QCBOR's own number")
+tag_requirements_carry_qcbors_numbers()
+    assert_eq(TagRequirement.Required.code(), 0, "the tag must be there")
+    assert_eq(TagRequirement.Absent.code(), 1, "it must not")
+    assert_eq(TagRequirement.Optional.code(), 2, "either")
+
+    // The "allowing extra" half is the same three with QCBOR's bit OR'd on top.
+    assert_eq(TagRequirement.RequiredAllowingExtra.code(), 0x80, "required, further tags allowed")
+    assert_eq(TagRequirement.AbsentAllowingExtra.code(), 0x81, "absent, further tags allowed")
+    assert_eq(TagRequirement.OptionalAllowingExtra.code(), 0x82, "either, further tags allowed")
+end tag_requirements_carry_qcbors_numbers
+
+// **This is the test that would have caught card 0105**, which the reshape walked into: a `u8`
+// answered by a six-arm match reached the C as a different value, so every `Required` read was
+// refused. `a_tag_requirement_is_enforced` above is what went red; this says the same thing about
+// the number rather than about the outcome, so a re-break names the cause.
+@test("the requirement a getter is given is the one QCBOR acts on")
+a_tag_requirement_reaches_the_library()
+    var tagged = decoder(unhex("c11a514b67b0"), Normal)
+    var bare = decoder(unhex("1a514b67b0"), Normal)
+
+    assert(!failed(tagged.get_epoch_date(Required)), "a tagged date under Required")
+    assert(failed(bare.get_epoch_date(Required)), "an untagged one under Required")
+end a_tag_requirement_reaches_the_library
+
+// Every `ItemKind` this binding claims QCBOR produces, read back off real CBOR. A variant on the
+// wrong side of an arrow in `ItemKind.of` shows up here and nowhere else.
+@test("an item's kind is the one QCBOR reported")
+item_kinds_come_back_as_themselves()
+    // QCBOR reports a small unsigned as `INT64` and only reaches for `UINT64` above 2^63,
+    // which is the whole reason `Item` has both accessors.
+    assert_eq(first_kind("01"), Int, "a small unsigned integer")
+    assert_eq(first_kind("1bffffffffffffffff"), Uint, "one past what a long holds")
+    assert_eq(first_kind("20"), Int, "a negative integer")
+    assert_eq(first_kind("80"), Array, "an array")
+    assert_eq(first_kind("a0"), Map, "a map")
+    assert_eq(first_kind("41ff"), ByteString, "a byte string")
+    assert_eq(first_kind("6161"), TextString, "a text string")
+    assert_eq(first_kind("f4"), False, "false")
+    assert_eq(first_kind("f5"), True, "true")
+    assert_eq(first_kind("f6"), Null, "null")
+    assert_eq(first_kind("f7"), Undef, "undefined")
+    assert_eq(first_kind("f93c00"), Double, "a half-precision float, widened")
+    assert_eq(first_kind("f0"), UnknownSimple, "a simple value CBOR has not named")
+    assert_eq(first_kind("c11a514b67b0"), DateEpoch, "tag 1")
+    assert_eq(first_kind("c074323031332d30332d32315432303a30343a30305a"), DateString, "tag 0")
+    assert_eq(first_kind("c249010000000000000000"), PosBignum, "tag 2")
+    assert_eq(first_kind("c349010000000000000000"), NegBignum, "tag 3")
+    assert_eq(first_kind("c48221196ab3"), DecimalFraction, "tag 4")
+    assert_eq(first_kind("c5822003"), BigFloat, "tag 5")
+    assert_eq(first_kind("d8206c687474703a2f2f612e636f6d"), Uri, "tag 32")
+
+    // The one kind that is a property of the decode rather than of the bytes.
+    var m = decoder(unhex("a10102"), MapsAsArrays)
+
+    assert_eq(kind_of(m.next()), MapAsArray, "a map read in MapsAsArrays mode")
+end item_kinds_come_back_as_themselves
+
+// The kind of the *label* of a map entry travels through the same match, by a different accessor.
+@test("a map entry's label kind comes back as itself")
+label_kinds_come_back_as_themselves()
+    // {"a": 1}
+    var d = decoder(unhex("a1616101"), Normal)
+
+    d.next() match
+        Err(e) -> assert(false, e.message())
+        Ok(_) -> ()
+
+    d.next() match
+        Err(e) -> assert(false, e.message())
+        Ok(item) -> assert_eq(item.label_kind().expect("a map entry has a label"), TextString,
+                              "the label is text")
+end label_kinds_come_back_as_themselves
+
+private first_kind(hex: string) -> ItemKind
+    var d = decoder(unhex(hex), Normal)
+
+    kind_of(d.next())
+end first_kind
+
+private kind_of(r: Result[Item, Error]) -> ItemKind =
+    r match
+        Err(_) -> Unset
+        Ok(item) -> item.kind()
+
+// An enum prints as the thing it names rather than as its number, which is what makes `assert_eq`
+// above legible and what a program reporting a refusal wants.
+@test("the enums print as words")
+the_enums_print_as_words()
+    assert_eq(f"${ItemKind.TextString}", "text string", "an item kind")
+    assert_eq(f"${ItemKind.DecimalFractionNegBignum}",
+              "decimal fraction with a negative bignum mantissa", "a compound one")
+    assert_eq(f"${ErrorKind.NoMoreItems}", "no more items", "an error kind")
+    assert_eq(f"${TagRequirement.OptionalAllowingExtra}", "either, further tags allowed",
+              "a tag requirement")
+    assert_eq(f"${DecodeMode.MapsAsArrays}", "maps as arrays", "a decode mode")
+
+    // `Error` prints QCBOR's own name for the number instead, which is more specific than the
+    // kind's word and is what a report of an unrecognised failure has to fall back on.
+    assert_eq(f"${Error(1)}", "QCBOR_ERR_BUFFER_TOO_SMALL", "an error itself")
+    assert_eq(f"${Error(1).kind()}", "the buffer is too small", "and its kind, in words")
+end the_enums_print_as_words

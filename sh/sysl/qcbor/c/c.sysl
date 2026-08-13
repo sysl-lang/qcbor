@@ -57,26 +57,26 @@ c const
     //
     // **Being a constant is what makes `[encode_words]u64` a legal array**, so a program with no
     // heap at all can hold an encoder's storage in its own frame.
-    encode_context_words: usize = "(sizeof(QCBOREncodeContext) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
+    ENCODE_CONTEXT_WORDS: usize = "(sizeof(QCBOREncodeContext) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
 
     // The most bytes `encode_head` can write, for sizing the buffer it is given.
-    head_buffer_size: usize = "QCBOR_HEAD_BUFFER_SIZE"
+    HEAD_BUFFER_SIZE: usize = "QCBOR_HEAD_BUFFER_SIZE"
 
     // How many 64-bit words a decoder's storage needs. Larger than an encoder's, because it sizes
     // the context and the item slot together -- which is why `SyslDecoder` is declared in `shim.h`
     // rather than inside `shim.c`: a constant is compiled outside the shim and has to be able to
     // name what it measures.
-    decode_context_words: usize = "(sizeof(SyslDecoder) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
+    DECODE_CONTEXT_WORDS: usize = "(sizeof(SyslDecoder) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
 
     // The most tags QCBOR records for one item. Tags beyond this are `TooManyTags`.
-    qcbor_max_tags_per_item: u32 = "QCBOR_MAX_TAGS_PER_ITEM"
+    MAX_TAGS_PER_ITEM: u32 = "QCBOR_MAX_TAGS_PER_ITEM"
 
     // QCBOR's own overhead in a string pool, which a pool must exceed to be accepted.
-    decode_min_mem_pool_size: usize = "QCBOR_DECODE_MIN_MEM_POOL_SIZE"
+    DECODE_MIN_MEM_POOL_SIZE: usize = "QCBOR_DECODE_MIN_MEM_POOL_SIZE"
 
     // The member count QCBOR reports for an array or a map whose length is indefinite. A sentinel
     // rather than a size: `Item.count` answers `None` for it, which is what a caller reads.
-    count_indicates_indefinite_length: u16 = "QCBOR_COUNT_INDICATES_INDEFINITE_LENGTH"
+    COUNT_INDICATES_INDEFINITE_LENGTH: u16 = "QCBOR_COUNT_INDICATES_INDEFINITE_LENGTH"
 
 
 // ==================================================================================================
@@ -92,43 +92,185 @@ c const
 // ==================================================================================================
 
 c const
-    cbor_tag_date_string: u64 = "CBOR_TAG_DATE_STRING"
-    cbor_tag_date_epoch: u64 = "CBOR_TAG_DATE_EPOCH"
-    cbor_tag_pos_bignum: u64 = "CBOR_TAG_POS_BIGNUM"
-    cbor_tag_neg_bignum: u64 = "CBOR_TAG_NEG_BIGNUM"
-    cbor_tag_decimal_fraction: u64 = "CBOR_TAG_DECIMAL_FRACTION"
-    cbor_tag_bigfloat: u64 = "CBOR_TAG_BIGFLOAT"
-    cbor_tag_cose_encrypt0: u64 = "CBOR_TAG_COSE_ENCRYPT0"
-    cbor_tag_cose_mac0: u64 = "CBOR_TAG_COSE_MAC0"
-    cbor_tag_cose_sign1: u64 = "CBOR_TAG_COSE_SIGN1"
-    cbor_tag_enc_as_b64url: u64 = "CBOR_TAG_ENC_AS_B64URL"
-    cbor_tag_enc_as_b64: u64 = "CBOR_TAG_ENC_AS_B64"
-    cbor_tag_enc_as_b16: u64 = "CBOR_TAG_ENC_AS_B16"
-    cbor_tag_cbor: u64 = "CBOR_TAG_CBOR"
-    cbor_tag_uri: u64 = "CBOR_TAG_URI"
-    cbor_tag_b64url: u64 = "CBOR_TAG_B64URL"
-    cbor_tag_b64: u64 = "CBOR_TAG_B64"
-    cbor_tag_regex: u64 = "CBOR_TAG_REGEX"
-    cbor_tag_mime: u64 = "CBOR_TAG_MIME"
-    cbor_tag_bin_uuid: u64 = "CBOR_TAG_BIN_UUID"
-    cbor_tag_cwt: u64 = "CBOR_TAG_CWT"
-    cbor_tag_cbor_sequence: u64 = "CBOR_TAG_CBOR_SEQUENCE"
-    cbor_tag_cose_encrypt: u64 = "CBOR_TAG_COSE_ENCRYPT"
-    cbor_tag_cose_mac: u64 = "CBOR_TAG_COSE_MAC"
-    cbor_tag_cose_sign: u64 = "CBOR_TAG_COSE_SIGN"
-    cbor_tag_days_epoch: u64 = "CBOR_TAG_DAYS_EPOCH"
-    cbor_tag_days_string: u64 = "CBOR_TAG_DAYS_STRING"
-    cbor_tag_geo_coord: u64 = "CBOR_TAG_GEO_COORD"
-    cbor_tag_binary_mime: u64 = "CBOR_TAG_BINARY_MIME"
-    cbor_tag_cbor_magic: u64 = "CBOR_TAG_CBOR_MAGIC"
-    cbor_tag_invalid64: u64 = "CBOR_TAG_INVALID64"
+    TAG_DATE_STRING: u64 = "CBOR_TAG_DATE_STRING"
+    TAG_DATE_EPOCH: u64 = "CBOR_TAG_DATE_EPOCH"
+    TAG_POS_BIGNUM: u64 = "CBOR_TAG_POS_BIGNUM"
+    TAG_NEG_BIGNUM: u64 = "CBOR_TAG_NEG_BIGNUM"
+    TAG_DECIMAL_FRACTION: u64 = "CBOR_TAG_DECIMAL_FRACTION"
+    TAG_BIGFLOAT: u64 = "CBOR_TAG_BIGFLOAT"
+    TAG_COSE_ENCRYPT0: u64 = "CBOR_TAG_COSE_ENCRYPT0"
+    TAG_COSE_MAC0: u64 = "CBOR_TAG_COSE_MAC0"
+    TAG_COSE_SIGN1: u64 = "CBOR_TAG_COSE_SIGN1"
+    TAG_ENC_AS_B64URL: u64 = "CBOR_TAG_ENC_AS_B64URL"
+    TAG_ENC_AS_B64: u64 = "CBOR_TAG_ENC_AS_B64"
+    TAG_ENC_AS_B16: u64 = "CBOR_TAG_ENC_AS_B16"
+    TAG_CBOR: u64 = "CBOR_TAG_CBOR"
+    TAG_URI: u64 = "CBOR_TAG_URI"
+    TAG_B64URL: u64 = "CBOR_TAG_B64URL"
+    TAG_B64: u64 = "CBOR_TAG_B64"
+    TAG_REGEX: u64 = "CBOR_TAG_REGEX"
+    TAG_MIME: u64 = "CBOR_TAG_MIME"
+    TAG_BIN_UUID: u64 = "CBOR_TAG_BIN_UUID"
+    TAG_CWT: u64 = "CBOR_TAG_CWT"
+    TAG_CBOR_SEQUENCE: u64 = "CBOR_TAG_CBOR_SEQUENCE"
+    TAG_COSE_ENCRYPT: u64 = "CBOR_TAG_COSE_ENCRYPT"
+    TAG_COSE_MAC: u64 = "CBOR_TAG_COSE_MAC"
+    TAG_COSE_SIGN: u64 = "CBOR_TAG_COSE_SIGN"
+    TAG_DAYS_EPOCH: u64 = "CBOR_TAG_DAYS_EPOCH"
+    TAG_DAYS_STRING: u64 = "CBOR_TAG_DAYS_STRING"
+    TAG_GEO_COORD: u64 = "CBOR_TAG_GEO_COORD"
+    TAG_BINARY_MIME: u64 = "CBOR_TAG_BINARY_MIME"
+    TAG_CBOR_MAGIC: u64 = "CBOR_TAG_CBOR_MAGIC"
+    TAG_INVALID64: u64 = "CBOR_TAG_INVALID64"
 
+
+
+// ==================================================================================================
+// QCBOR's own numbering
+//
+// **These replace three hand-written translation tables in `shim.c`**, each of which mapped a QCBOR
+// constant to a dense ordinal that had to match the declaration order of an enum in another
+// language. Nothing checked either half, and the package's own comment admitted it: *"the
+// declaration order above IS the agreement with `shim.c`"*. Asking the C compiler for the values
+// instead moves the correspondence into one `match` per enum, where a name that does not exist is a
+// compile error and a variant with no arm is one too.
+//
+// The numbers are sparse and run past 78 with gaps, which is why the shim translated rather than
+// crossing them raw. That was never the difficulty -- a `match` handles a sparse set as easily as a
+// dense one, and the fallback arm is what the `default:` was.
+// ==================================================================================================
+
+// The failures QCBOR reports. `sh.sysl.qcbor.ErrorKind` matches on these.
+//
+// Three spellings share the value 48 -- `QCBOR_ERR_UNRECOVERABLE_TAG_CONTENT`,
+// `QCBOR_ERR_BAD_TAG_CONTENT` and `QCBOR_ERR_BAD_OPT_TAG`. Only the middle one is named here,
+// because two constant patterns of equal value cannot both be arms of one match, and it is the
+// spelling QCBOR's own header presents first.
+c const
+    SUCCESS: int = "QCBOR_SUCCESS"
+    ERR_BUFFER_TOO_SMALL: int = "QCBOR_ERR_BUFFER_TOO_SMALL"
+    ERR_ENCODE_UNSUPPORTED: int = "QCBOR_ERR_ENCODE_UNSUPPORTED"
+    ERR_BUFFER_TOO_LARGE: int = "QCBOR_ERR_BUFFER_TOO_LARGE"
+    ERR_ARRAY_NESTING_TOO_DEEP: int = "QCBOR_ERR_ARRAY_NESTING_TOO_DEEP"
+    ERR_CLOSE_MISMATCH: int = "QCBOR_ERR_CLOSE_MISMATCH"
+    ERR_ARRAY_TOO_LONG: int = "QCBOR_ERR_ARRAY_TOO_LONG"
+    ERR_TOO_MANY_CLOSES: int = "QCBOR_ERR_TOO_MANY_CLOSES"
+    ERR_ARRAY_OR_MAP_STILL_OPEN: int = "QCBOR_ERR_ARRAY_OR_MAP_STILL_OPEN"
+    ERR_OPEN_BYTE_STRING: int = "QCBOR_ERR_OPEN_BYTE_STRING"
+    ERR_CANNOT_CANCEL: int = "QCBOR_ERR_CANNOT_CANCEL"
+    ERR_EXTRA_BYTES: int = "QCBOR_ERR_EXTRA_BYTES"
+    ERR_UNSUPPORTED: int = "QCBOR_ERR_UNSUPPORTED"
+    ERR_ARRAY_OR_MAP_UNCONSUMED: int = "QCBOR_ERR_ARRAY_OR_MAP_UNCONSUMED"
+    ERR_BAD_INT: int = "QCBOR_ERR_BAD_INT"
+    ERR_INDEFINITE_STRING_CHUNK: int = "QCBOR_ERR_INDEFINITE_STRING_CHUNK"
+    ERR_HIT_END: int = "QCBOR_ERR_HIT_END"
+    ERR_BAD_BREAK: int = "QCBOR_ERR_BAD_BREAK"
+    ERR_INPUT_TOO_LARGE: int = "QCBOR_ERR_INPUT_TOO_LARGE"
+    ERR_ARRAY_DECODE_NESTING_TOO_DEEP: int = "QCBOR_ERR_ARRAY_DECODE_NESTING_TOO_DEEP"
+    ERR_ARRAY_DECODE_TOO_LONG: int = "QCBOR_ERR_ARRAY_DECODE_TOO_LONG"
+    ERR_STRING_TOO_LONG: int = "QCBOR_ERR_STRING_TOO_LONG"
+    ERR_BAD_EXP_AND_MANTISSA: int = "QCBOR_ERR_BAD_EXP_AND_MANTISSA"
+    ERR_NO_STRING_ALLOCATOR: int = "QCBOR_ERR_NO_STRING_ALLOCATOR"
+    ERR_STRING_ALLOCATE: int = "QCBOR_ERR_STRING_ALLOCATE"
+    ERR_MAP_LABEL_TYPE: int = "QCBOR_ERR_MAP_LABEL_TYPE"
+    ERR_BAD_TAG_CONTENT: int = "QCBOR_ERR_BAD_TAG_CONTENT"
+    ERR_INDEF_LEN_STRINGS_DISABLED: int = "QCBOR_ERR_INDEF_LEN_STRINGS_DISABLED"
+    ERR_INDEF_LEN_ARRAYS_DISABLED: int = "QCBOR_ERR_INDEF_LEN_ARRAYS_DISABLED"
+    ERR_TAGS_DISABLED: int = "QCBOR_ERR_TAGS_DISABLED"
+    ERR_TOO_MANY_TAGS: int = "QCBOR_ERR_TOO_MANY_TAGS"
+    ERR_UNEXPECTED_TYPE: int = "QCBOR_ERR_UNEXPECTED_TYPE"
+    ERR_DUPLICATE_LABEL: int = "QCBOR_ERR_DUPLICATE_LABEL"
+    ERR_MEM_POOL_SIZE: int = "QCBOR_ERR_MEM_POOL_SIZE"
+    ERR_INT_OVERFLOW: int = "QCBOR_ERR_INT_OVERFLOW"
+    ERR_DATE_OVERFLOW: int = "QCBOR_ERR_DATE_OVERFLOW"
+    ERR_EXIT_MISMATCH: int = "QCBOR_ERR_EXIT_MISMATCH"
+    ERR_NO_MORE_ITEMS: int = "QCBOR_ERR_NO_MORE_ITEMS"
+    ERR_LABEL_NOT_FOUND: int = "QCBOR_ERR_LABEL_NOT_FOUND"
+    ERR_NUMBER_SIGN_CONVERSION: int = "QCBOR_ERR_NUMBER_SIGN_CONVERSION"
+    ERR_CONVERSION_UNDER_OVER_FLOW: int = "QCBOR_ERR_CONVERSION_UNDER_OVER_FLOW"
+    ERR_MAP_NOT_ENTERED: int = "QCBOR_ERR_MAP_NOT_ENTERED"
+    ERR_CALLBACK_FAIL: int = "QCBOR_ERR_CALLBACK_FAIL"
+    ERR_FLOAT_DATE_DISABLED: int = "QCBOR_ERR_FLOAT_DATE_DISABLED"
+    ERR_HALF_PRECISION_DISABLED: int = "QCBOR_ERR_HALF_PRECISION_DISABLED"
+    ERR_HW_FLOAT_DISABLED: int = "QCBOR_ERR_HW_FLOAT_DISABLED"
+    ERR_FLOAT_EXCEPTION: int = "QCBOR_ERR_FLOAT_EXCEPTION"
+    ERR_ALL_FLOAT_DISABLED: int = "QCBOR_ERR_ALL_FLOAT_DISABLED"
+    ERR_RECOVERABLE_BAD_TAG_CONTENT: int = "QCBOR_ERR_RECOVERABLE_BAD_TAG_CONTENT"
+    ERR_CANNOT_ENTER_ALLOCATED_STRING: int = "QCBOR_ERR_CANNOT_ENTER_ALLOCATED_STRING"
+
+// The conversions a `_convert` getter will accept, OR'd together. A set of bits rather than a
+// number, so `CONVERT_TYPE_XINT64 | CONVERT_TYPE_FLOAT` is one call that takes either.
+c const
+    CONVERT_TYPE_XINT64: u32 = "QCBOR_CONVERT_TYPE_XINT64"
+    CONVERT_TYPE_FLOAT: u32 = "QCBOR_CONVERT_TYPE_FLOAT"
+    CONVERT_TYPE_BIG_NUM: u32 = "QCBOR_CONVERT_TYPE_BIG_NUM"
+    CONVERT_TYPE_DECIMAL_FRACTION: u32 = "QCBOR_CONVERT_TYPE_DECIMAL_FRACTION"
+    CONVERT_TYPE_BIGFLOAT: u32 = "QCBOR_CONVERT_TYPE_BIGFLOAT"
+
+// Whether a tagged getter insists on the tag number. The first three are the requirement and the
+// fourth is a bit OR'd on top of one of them, which is what `TagRequirement`'s six variants are.
+c const
+    TAG_REQUIREMENT_TAG: int = "QCBOR_TAG_REQUIREMENT_TAG"
+    TAG_REQUIREMENT_NOT_A_TAG: int = "QCBOR_TAG_REQUIREMENT_NOT_A_TAG"
+    TAG_REQUIREMENT_OPTIONAL_TAG: int = "QCBOR_TAG_REQUIREMENT_OPTIONAL_TAG"
+    TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS: int = "QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS"
+
+// How a map's labels are read, which is fixed when the decoder is made.
+c const
+    DECODE_MODE_NORMAL: int = "QCBOR_DECODE_MODE_NORMAL"
+    DECODE_MODE_MAP_STRINGS_ONLY: int = "QCBOR_DECODE_MODE_MAP_STRINGS_ONLY"
+    DECODE_MODE_MAP_AS_ARRAY: int = "QCBOR_DECODE_MODE_MAP_AS_ARRAY"
+
+// The batch list: how many 64-bit words one needs, and how many labels it holds.
+c const
+    ITEM_LIST_WORDS: usize = "(sizeof(SyslItemList) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
+    ITEM_LIST_CAPACITY: usize = "SYSL_ITEMS_MAX"
+
+// What a decoded item is -- `QCBORItem.uDataType`, and `uLabelType` for a map entry's label.
+// `sh.sysl.qcbor.ItemKind` matches on these.
+c const
+    // Not a type QCBOR ever reports: it is what a batch entry asks for when any type will do.
+    TYPE_ANY: int = "QCBOR_TYPE_ANY"
+
+    TYPE_NONE: int = "QCBOR_TYPE_NONE"
+    TYPE_INT64: int = "QCBOR_TYPE_INT64"
+    TYPE_UINT64: int = "QCBOR_TYPE_UINT64"
+    TYPE_ARRAY: int = "QCBOR_TYPE_ARRAY"
+    TYPE_MAP: int = "QCBOR_TYPE_MAP"
+    TYPE_BYTE_STRING: int = "QCBOR_TYPE_BYTE_STRING"
+    TYPE_TEXT_STRING: int = "QCBOR_TYPE_TEXT_STRING"
+    TYPE_POSBIGNUM: int = "QCBOR_TYPE_POSBIGNUM"
+    TYPE_NEGBIGNUM: int = "QCBOR_TYPE_NEGBIGNUM"
+    TYPE_DATE_STRING: int = "QCBOR_TYPE_DATE_STRING"
+    TYPE_DATE_EPOCH: int = "QCBOR_TYPE_DATE_EPOCH"
+    TYPE_UKNOWN_SIMPLE: int = "QCBOR_TYPE_UKNOWN_SIMPLE"
+    TYPE_DECIMAL_FRACTION: int = "QCBOR_TYPE_DECIMAL_FRACTION"
+    TYPE_DECIMAL_FRACTION_POS_BIGNUM: int = "QCBOR_TYPE_DECIMAL_FRACTION_POS_BIGNUM"
+    TYPE_DECIMAL_FRACTION_NEG_BIGNUM: int = "QCBOR_TYPE_DECIMAL_FRACTION_NEG_BIGNUM"
+    TYPE_BIGFLOAT: int = "QCBOR_TYPE_BIGFLOAT"
+    TYPE_BIGFLOAT_POS_BIGNUM: int = "QCBOR_TYPE_BIGFLOAT_POS_BIGNUM"
+    TYPE_BIGFLOAT_NEG_BIGNUM: int = "QCBOR_TYPE_BIGFLOAT_NEG_BIGNUM"
+    TYPE_FALSE: int = "QCBOR_TYPE_FALSE"
+    TYPE_TRUE: int = "QCBOR_TYPE_TRUE"
+    TYPE_NULL: int = "QCBOR_TYPE_NULL"
+    TYPE_UNDEF: int = "QCBOR_TYPE_UNDEF"
+    TYPE_FLOAT: int = "QCBOR_TYPE_FLOAT"
+    TYPE_DOUBLE: int = "QCBOR_TYPE_DOUBLE"
+    TYPE_MAP_AS_ARRAY: int = "QCBOR_TYPE_MAP_AS_ARRAY"
+    TYPE_URI: int = "QCBOR_TYPE_URI"
+    TYPE_BASE64URL: int = "QCBOR_TYPE_BASE64URL"
+    TYPE_BASE64: int = "QCBOR_TYPE_BASE64"
+    TYPE_REGEX: int = "QCBOR_TYPE_REGEX"
+    TYPE_MIME: int = "QCBOR_TYPE_MIME"
+    TYPE_UUID: int = "QCBOR_TYPE_UUID"
+    TYPE_BINARY_MIME: int = "QCBOR_TYPE_BINARY_MIME"
+    TYPE_DAYS_STRING: int = "QCBOR_TYPE_DAYS_STRING"
+    TYPE_DAYS_EPOCH: int = "QCBOR_TYPE_DAYS_EPOCH"
 
 // ==================================================================================================
 // Errors
 // ==================================================================================================
 
-extern "sysl_qcbor_error_ordinal" error_ordinal(err: int) -> int
 extern "sysl_qcbor_error_message" error_message(err: int) -> *u8
 extern "sysl_qcbor_error_is_not_well_formed" error_is_not_well_formed(err: int) -> int
 extern "sysl_qcbor_error_is_unrecoverable" error_is_unrecoverable(err: int) -> int
@@ -262,8 +404,6 @@ extern "sysl_qcbor_decode_set_allocator" decode_set_allocator(
 // The bounded getters, and the batch list
 // ==================================================================================================
 
-extern "sysl_qcbor_items_words" items_words() -> usize
-extern "sysl_qcbor_items_capacity" items_capacity() -> usize
 extern "sysl_qcbor_items_init" items_init(storage: *u64, words: usize) -> *ItemListCtx
 extern "sysl_qcbor_items_want" items_want(l: *ItemListCtx, label: *u8, n: usize,
                                             kind: int) -> int
@@ -275,8 +415,6 @@ extern "sysl_qcbor_items_run_with_callback" items_run_cb(d: *DecodeCtx, l: *Item
 extern "sysl_qcbor_items_select" items_select(d: *DecodeCtx, l: *ItemListCtx,
                                                 index: usize) -> int
 extern "sysl_qcbor_item_stage" item_stage(d: *DecodeCtx, item: *u8)
-extern "sysl_qcbor_callback_ok" callback_ok() -> int
-extern "sysl_qcbor_callback_fail" callback_fail() -> int
 extern "sysl_qcbor_get_int64" get_int64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                           out: *long) -> int
 extern "sysl_qcbor_get_uint64" get_uint64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
@@ -310,47 +448,41 @@ extern "sysl_qcbor_get_double_convert" get_double_convert(d: *DecodeCtx, lk: int
 extern "sysl_qcbor_get_double_convert_all" get_double_convert_all(d: *DecodeCtx, lk: int,
                                                                     ln: long, lp: *u8, ll: usize, types: u32,
                                                                     out: *real) -> int
-extern "sysl_qcbor_convert_xint64" convert_xint64() -> u32
-extern "sysl_qcbor_convert_float" convert_float() -> u32
-extern "sysl_qcbor_convert_big_num" convert_big_num() -> u32
-extern "sysl_qcbor_convert_decimal_fraction" convert_decimal_fraction() -> u32
-extern "sysl_qcbor_convert_bigfloat" convert_bigfloat() -> u32
-extern "sysl_qcbor_tag_requirement" tag_requirement(ordinal: int) -> u8
 extern "sysl_qcbor_get_epoch_date" get_epoch_date(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                    req: u8, out: *long) -> int
+                                                    req: int, out: *long) -> int
 extern "sysl_qcbor_get_epoch_days" get_epoch_days(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                    req: u8, out: *long) -> int
+                                                    req: int, out: *long) -> int
 extern "sysl_qcbor_get_date_string" get_date_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: u8, p: **u8, n: *usize) -> int
+                                                      req: int, p: **u8, n: *usize) -> int
 extern "sysl_qcbor_get_days_string" get_days_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: u8, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_uri" get_uri(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+                                                      req: int, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_uri" get_uri(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
                                       p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_b64" get_b64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+extern "sysl_qcbor_get_b64" get_b64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
                                       p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_b64url" get_b64url(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+extern "sysl_qcbor_get_b64url" get_b64url(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
                                             p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_regex" get_regex(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+extern "sysl_qcbor_get_regex" get_regex(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
                                           p: **u8, n: *usize) -> int
 extern "sysl_qcbor_get_binary_uuid" get_binary_uuid(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: u8, p: **u8, n: *usize) -> int
+                                                      req: int, p: **u8, n: *usize) -> int
 extern "sysl_qcbor_get_tagged_str" get_tagged_str(d: *DecodeCtx, which: int, lk: int, ln: long,
-                                                    lp: *u8, ll: usize, req: u8, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_bignum" get_bignum(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+                                                    lp: *u8, ll: usize, req: int, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_bignum" get_bignum(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
                                             p: **u8, n: *usize, negative: *int) -> int
-extern "sysl_qcbor_get_mime" get_mime(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+extern "sysl_qcbor_get_mime" get_mime(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
                                         p: **u8, n: *usize, binary: *int) -> int
 extern "sysl_qcbor_get_decimal_fraction" get_decimal_fraction(d: *DecodeCtx, lk: int, ln: long,
-                                                                lp: *u8, ll: usize, req: u8, mantissa: *long,
+                                                                lp: *u8, ll: usize, req: int, mantissa: *long,
                                                                 exponent: *long) -> int
 extern "sysl_qcbor_get_big_float" get_big_float(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                  req: u8, mantissa: *long,
+                                                  req: int, mantissa: *long,
                                                   exponent: *long) -> int
 extern "sysl_qcbor_get_decimal_fraction_big" get_decimal_fraction_big(
-    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
+    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int, scratch: *u8, scratch_len: usize,
     p: **u8, n: *usize, negative: *int, exponent: *long) -> int
 extern "sysl_qcbor_get_big_float_big" get_big_float_big(
-    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
+    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int, scratch: *u8, scratch_len: usize,
     p: **u8, n: *usize, negative: *int, exponent: *long) -> int
 extern "sysl_qcbor_enter_map" enter_map(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
 extern "sysl_qcbor_enter_array" enter_array(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
@@ -361,7 +493,7 @@ extern "sysl_qcbor_get_map_bytes" get_map_bytes(d: *DecodeCtx, lk: int, ln: long
 extern "sysl_qcbor_get_array_bytes" get_array_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                       p: **u8, n: *usize) -> int
 extern "sysl_qcbor_enter_bstr_wrapped" enter_bstr_wrapped(d: *DecodeCtx, lk: int, ln: long,
-                                                            lp: *u8, ll: usize, req: u8, p: **u8,
+                                                            lp: *u8, ll: usize, req: int, p: **u8,
                                                             n: *usize) -> int
 extern "sysl_qcbor_exit_bstr_wrapped" exit_bstr_wrapped(d: *DecodeCtx) -> int
 extern "sysl_qcbor_get_item_in_map" get_item_in_map(d: *DecodeCtx, lk: int, ln: long,

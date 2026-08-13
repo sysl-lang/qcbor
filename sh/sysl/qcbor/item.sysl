@@ -1,6 +1,11 @@
 module sh.sysl.qcbor
 
 import sh.sysl.qcbor.c
+// Unqualified, because a module-qualified `c const` is not accepted in a `const` initializer --
+// card 0104, and the reason every constant below is named twice.
+import sh.sysl.qcbor.c.{CONVERT_TYPE_XINT64, CONVERT_TYPE_FLOAT, CONVERT_TYPE_BIG_NUM,
+                        CONVERT_TYPE_DECIMAL_FRACTION, CONVERT_TYPE_BIGFLOAT, SUCCESS,
+                        ERR_CALLBACK_FAIL, ITEM_LIST_CAPACITY}
 import sysl.slices.as_ptr
 import sysl.text.{from_utf8, Utf8Error}
 
@@ -42,7 +47,7 @@ end BigMantissa
 //
 // The three requirements each come in a plain form and one that tolerates further tags wrapped around
 // the item -- QCBOR ORs a bit for that, and six named values is clearer than a second parameter
-// threaded through eighty declarations. The order is `shim.c`'s.
+// threaded through eighty declarations.
 enum TagRequirement
     // The tag number must be present. The self-describing form.
     Required
@@ -54,7 +59,40 @@ enum TagRequirement
     RequiredAllowingExtra
     AbsentAllowingExtra
     OptionalAllowingExtra
+
+    // The number QCBOR takes. The three plain requirements are values and "additional tags allowed"
+    // is a bit OR'd on top, which is why six named variants beat a second parameter threaded
+    // through eighty declarations.
+    //
+    // **`int` rather than the `uint8_t` QCBOR's own parameter is, and the shim was widened to
+    // match.** A `u8` answered by a six-arm match reaches a C function as a *different value* --
+    // card 0105, where the reduction is this function almost exactly. Nothing in sysl notices: the
+    // value prints as 0 on the line before the call that acts on something else. Widening the shim
+    // costs one cast at each point of use and is the only thing between here and a wrong decode.
+    code(self) -> int
+        self match
+            Required -> c.TAG_REQUIREMENT_TAG
+            Absent -> c.TAG_REQUIREMENT_NOT_A_TAG
+            Optional -> c.TAG_REQUIREMENT_OPTIONAL_TAG
+            RequiredAllowingExtra -> c.TAG_REQUIREMENT_TAG | c.TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS
+            AbsentAllowingExtra ->
+                c.TAG_REQUIREMENT_NOT_A_TAG | c.TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS
+            OptionalAllowingExtra ->
+                c.TAG_REQUIREMENT_OPTIONAL_TAG | c.TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS
 end TagRequirement
+
+// What a getter was told to insist on, for a diagnostic that has to say what it asked for.
+impl Display for TagRequirement
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Required -> "required"
+            Absent -> "absent"
+            Optional -> "either"
+            RequiredAllowingExtra -> "required, further tags allowed"
+            AbsentAllowingExtra -> "absent, further tags allowed"
+            OptionalAllowingExtra -> "either, further tags allowed"
+
+        display_str(s, out, fmt)
 
 // A list of labels to fetch in one pass, and the results.
 //
@@ -69,7 +107,7 @@ struct ItemList
     // is what a caller who will inspect the kind themselves wants.
     want(self, label: string, expected: ItemKind) -> Result[unit, string]
         val b = label.bytes
-        val code = c.items_want(self.handle, as_ptr(b), b.len, int(expected))
+        val code = c.items_want(self.handle, as_ptr(b), b.len, want_type(expected))
 
         if code == 0 then Ok(())
         elif code == 1 then Err("this list already holds as many labels as it can")
@@ -78,7 +116,7 @@ struct ItemList
 
     // The same with an integer label.
     want_at(self, label: long, expected: ItemKind) -> Result[unit, string]
-        val code = c.items_want_at(self.handle, label, int(expected))
+        val code = c.items_want_at(self.handle, label, want_type(expected))
 
         if code == 0 then Ok(()) else Err("this list already holds as many labels as it can")
     end want_at
@@ -90,6 +128,29 @@ struct ItemList
     at(self, index: usize) -> Option[Item] =
         if c.items_select(self.of.handle, self.handle, index) != 0 then Some(Item(self.of)) else None
 end ItemList
+
+// The QCBOR type a batch entry asks for, or `TYPE_ANY` where the caller will inspect the kind
+// themselves.
+//
+// **QCBOR matches a batch entry on twelve types and not on all thirty-four**, so a kind outside that
+// set is asked for as "any" and checked by the caller afterwards. This used to be a switch in
+// `shim.c` keyed on the sysl enum's ordinal -- the third of three tables that had to agree with a
+// declaration order in another language, and the only one running in this direction.
+private want_type(k: ItemKind) -> int =
+    k match
+        Int -> c.TYPE_INT64
+        Uint -> c.TYPE_UINT64
+        Array -> c.TYPE_ARRAY
+        Map -> c.TYPE_MAP
+        ByteString -> c.TYPE_BYTE_STRING
+        TextString -> c.TYPE_TEXT_STRING
+        False -> c.TYPE_FALSE
+        True -> c.TYPE_TRUE
+        Null -> c.TYPE_NULL
+        Undef -> c.TYPE_UNDEF
+        Double -> c.TYPE_DOUBLE
+        DateEpoch -> c.TYPE_DATE_EPOCH
+        _ -> c.TYPE_ANY
 
 
 
@@ -129,22 +190,25 @@ private[qcbor] str_result(err: int, p: *u8, n: usize) -> Result[[]const u8, Erro
 
 // The conversion bits the `_convert` getters take, OR'd together to say which CBOR types one call
 // will accept.
-convert_int() -> u32 = c.convert_xint64()
-convert_float() -> u32 = c.convert_float()
-convert_bignum() -> u32 = c.convert_big_num()
-convert_decimal_fraction() -> u32 = c.convert_decimal_fraction()
-convert_big_float() -> u32 = c.convert_bigfloat()
+//
+// Constants rather than the calls these used to be, so `convert_int | convert_float` is folded at
+// compile time and can be given a name with a `const` of its own.
+const convert_int: u32 = CONVERT_TYPE_XINT64
+const convert_float: u32 = CONVERT_TYPE_FLOAT
+const convert_bignum: u32 = CONVERT_TYPE_BIG_NUM
+const convert_decimal_fraction: u32 = CONVERT_TYPE_DECIMAL_FRACTION
+const convert_big_float: u32 = CONVERT_TYPE_BIGFLOAT
 
 // What a callback passed to `get_items_checking` returns to accept an item, and to refuse one.
-callback_ok() -> int = c.callback_ok()
-callback_fail() -> int = c.callback_fail()
+const callback_ok: int = SUCCESS
+const callback_fail: int = ERR_CALLBACK_FAIL
 
 // How many labels one `ItemList` can hold.
-items_capacity() -> usize = c.items_capacity()
+const items_capacity: usize = ITEM_LIST_CAPACITY
 
 // A list of labels to fetch from `of`'s entered map in one pass.
 item_list(of: Decoder) -> ItemList
-    var storage: []u64 = [0; c.items_words()]
+    var storage: []u64 = [0; c.ITEM_LIST_WORDS]
 
     // Cannot fail: the storage was just sized by asking C what it needs.
     ItemList(storage, c.items_init(&storage[0], storage.len), of)
@@ -160,7 +224,7 @@ struct Item
     of: Decoder
 
     // What this item is, which decides which accessor below answers.
-    kind(self) -> ItemKind = item_kind(c.item_kind(self.of.handle))
+    kind(self) -> ItemKind = ItemKind.of(c.item_kind(self.of.handle))
 
     // How deep this item sits. `nesting` is its own level and `next_nesting` is the level of the item
     // after it -- **a drop between them is how a definite- and an indefinite-length array both say
@@ -285,7 +349,7 @@ struct Item
 
     // What kind of label this entry carries, or `None` at a level that is not a map.
     label_kind(self) -> Option[ItemKind]
-        val k = item_kind(c.item_label_kind(self.of.handle))
+        val k = ItemKind.of(c.item_label_kind(self.of.handle))
 
         if k == Unset then None else Some(k)
     end label_kind
@@ -390,7 +454,7 @@ end decoder
 decoder_with_storage(storage: []u64, input: []const u8, mode: DecodeMode) -> Result[Decoder, string]
     require storage.len > 0, "a decoder needs storage; size it with decoder_words"
 
-    val ctx = c.decoder_init(&storage[0], storage.len, as_ptr(input), input.len, mode_number(mode))
+    val ctx = c.decoder_init(&storage[0], storage.len, as_ptr(input), input.len, mode.code())
 
     if ctx == null then
         Err("the storage for a decoder is too small; size it with decoder_words")

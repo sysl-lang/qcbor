@@ -44,7 +44,6 @@
  */
 #include "shim.h"
 
-#include "qcbor_spiffy_decode.h"
 
 #include <string.h>
 
@@ -100,132 +99,14 @@ QCBOREncodeContext *sysl_qcbor_encode_init(uint64_t *storage, size_t words,
 /* ===================================================================== *
  * Errors
  *
- * QCBOR's error numbers are sparse and run to 255, with several spellings
- * sharing one value. The sysl side has an enum instead, so the translation is
- * a switch here -- which keeps every QCBOR constant in C, where the header
- * defines it, and leaves sysl holding only its own dense ordinals.
- *
- * `sysl_qcbor_error_ordinal` is total: anything unlisted becomes ORDINAL_OTHER
- * and carries its original number alongside, so a QCBOR that grows an error
- * this file has not heard of still reports something a caller can print.
+ * QCBOR's error numbers cross to sysl exactly as QCBOR gives them. There used
+ * to be a translation here -- fifty `ORDINAL_` defines and a switch mapping
+ * every QCBOR error onto a dense number that had to match the declaration
+ * order of `ErrorKind` in another language, with nothing comparing the two.
+ * `sh.sysl.qcbor.c` asks the C compiler for `QCBOR_ERR_*` instead and matches
+ * on the values, so the correspondence is checked by both compilers and this
+ * file no longer has an opinion about it.
  * ===================================================================== */
-
-#define ORDINAL_SUCCESS                     0
-#define ORDINAL_BUFFER_TOO_SMALL            1
-#define ORDINAL_ENCODE_UNSUPPORTED          2
-#define ORDINAL_BUFFER_TOO_LARGE            3
-#define ORDINAL_ARRAY_NESTING_TOO_DEEP      4
-#define ORDINAL_CLOSE_MISMATCH              5
-#define ORDINAL_ARRAY_TOO_LONG              6
-#define ORDINAL_TOO_MANY_CLOSES             7
-#define ORDINAL_ARRAY_OR_MAP_STILL_OPEN     8
-#define ORDINAL_OPEN_BYTE_STRING            9
-#define ORDINAL_CANNOT_CANCEL              10
-#define ORDINAL_EXTRA_BYTES                11
-#define ORDINAL_UNSUPPORTED                12
-#define ORDINAL_ARRAY_OR_MAP_UNCONSUMED    13
-#define ORDINAL_BAD_INT                    14
-#define ORDINAL_INDEFINITE_STRING_CHUNK    15
-#define ORDINAL_HIT_END                    16
-#define ORDINAL_BAD_BREAK                  17
-#define ORDINAL_INPUT_TOO_LARGE            18
-#define ORDINAL_ARRAY_DECODE_NESTING_DEEP  19
-#define ORDINAL_ARRAY_DECODE_TOO_LONG      20
-#define ORDINAL_STRING_TOO_LONG            21
-#define ORDINAL_BAD_EXP_AND_MANTISSA       22
-#define ORDINAL_NO_STRING_ALLOCATOR        23
-#define ORDINAL_STRING_ALLOCATE            24
-#define ORDINAL_MAP_LABEL_TYPE             25
-#define ORDINAL_BAD_TAG_CONTENT            26
-#define ORDINAL_INDEF_LEN_STRINGS_DISABLED 27
-#define ORDINAL_INDEF_LEN_ARRAYS_DISABLED  28
-#define ORDINAL_TAGS_DISABLED              29
-#define ORDINAL_TOO_MANY_TAGS              30
-#define ORDINAL_UNEXPECTED_TYPE            31
-#define ORDINAL_DUPLICATE_LABEL            32
-#define ORDINAL_MEM_POOL_SIZE              33
-#define ORDINAL_INT_OVERFLOW               34
-#define ORDINAL_DATE_OVERFLOW              35
-#define ORDINAL_EXIT_MISMATCH              36
-#define ORDINAL_NO_MORE_ITEMS              37
-#define ORDINAL_LABEL_NOT_FOUND            38
-#define ORDINAL_NUMBER_SIGN_CONVERSION     39
-#define ORDINAL_CONVERSION_UNDER_OVER_FLOW 40
-#define ORDINAL_MAP_NOT_ENTERED            41
-#define ORDINAL_CALLBACK_FAIL              42
-#define ORDINAL_FLOAT_DATE_DISABLED        43
-#define ORDINAL_HALF_PRECISION_DISABLED    44
-#define ORDINAL_HW_FLOAT_DISABLED          45
-#define ORDINAL_FLOAT_EXCEPTION            46
-#define ORDINAL_ALL_FLOAT_DISABLED         47
-#define ORDINAL_RECOVERABLE_BAD_TAG        48
-#define ORDINAL_CANNOT_ENTER_ALLOCATED     49
-#define ORDINAL_OTHER                      50
-
-int sysl_qcbor_error_ordinal(int err) {
-    switch ((QCBORError)err) {
-        case QCBOR_SUCCESS:                       return ORDINAL_SUCCESS;
-        case QCBOR_ERR_BUFFER_TOO_SMALL:          return ORDINAL_BUFFER_TOO_SMALL;
-        case QCBOR_ERR_ENCODE_UNSUPPORTED:        return ORDINAL_ENCODE_UNSUPPORTED;
-        case QCBOR_ERR_BUFFER_TOO_LARGE:          return ORDINAL_BUFFER_TOO_LARGE;
-        case QCBOR_ERR_ARRAY_NESTING_TOO_DEEP:    return ORDINAL_ARRAY_NESTING_TOO_DEEP;
-        case QCBOR_ERR_CLOSE_MISMATCH:            return ORDINAL_CLOSE_MISMATCH;
-        case QCBOR_ERR_ARRAY_TOO_LONG:            return ORDINAL_ARRAY_TOO_LONG;
-        case QCBOR_ERR_TOO_MANY_CLOSES:           return ORDINAL_TOO_MANY_CLOSES;
-        case QCBOR_ERR_ARRAY_OR_MAP_STILL_OPEN:   return ORDINAL_ARRAY_OR_MAP_STILL_OPEN;
-        case QCBOR_ERR_OPEN_BYTE_STRING:          return ORDINAL_OPEN_BYTE_STRING;
-        case QCBOR_ERR_CANNOT_CANCEL:             return ORDINAL_CANNOT_CANCEL;
-        case QCBOR_ERR_EXTRA_BYTES:               return ORDINAL_EXTRA_BYTES;
-        case QCBOR_ERR_UNSUPPORTED:               return ORDINAL_UNSUPPORTED;
-        case QCBOR_ERR_ARRAY_OR_MAP_UNCONSUMED:   return ORDINAL_ARRAY_OR_MAP_UNCONSUMED;
-        case QCBOR_ERR_BAD_INT:                   return ORDINAL_BAD_INT;
-        case QCBOR_ERR_INDEFINITE_STRING_CHUNK:   return ORDINAL_INDEFINITE_STRING_CHUNK;
-        case QCBOR_ERR_HIT_END:                   return ORDINAL_HIT_END;
-        case QCBOR_ERR_BAD_BREAK:                 return ORDINAL_BAD_BREAK;
-        case QCBOR_ERR_INPUT_TOO_LARGE:           return ORDINAL_INPUT_TOO_LARGE;
-        case QCBOR_ERR_ARRAY_DECODE_NESTING_TOO_DEEP:
-                                                  return ORDINAL_ARRAY_DECODE_NESTING_DEEP;
-        case QCBOR_ERR_ARRAY_DECODE_TOO_LONG:     return ORDINAL_ARRAY_DECODE_TOO_LONG;
-        case QCBOR_ERR_STRING_TOO_LONG:           return ORDINAL_STRING_TOO_LONG;
-        case QCBOR_ERR_BAD_EXP_AND_MANTISSA:      return ORDINAL_BAD_EXP_AND_MANTISSA;
-        case QCBOR_ERR_NO_STRING_ALLOCATOR:       return ORDINAL_NO_STRING_ALLOCATOR;
-        case QCBOR_ERR_STRING_ALLOCATE:           return ORDINAL_STRING_ALLOCATE;
-        case QCBOR_ERR_MAP_LABEL_TYPE:            return ORDINAL_MAP_LABEL_TYPE;
-        /* QCBOR_ERR_UNRECOVERABLE_TAG_CONTENT and QCBOR_ERR_BAD_OPT_TAG are
-         * two more spellings of this same value, so they cannot be separate
-         * cases -- the compiler would refuse the duplicate.
-         */
-        case QCBOR_ERR_BAD_TAG_CONTENT:           return ORDINAL_BAD_TAG_CONTENT;
-        case QCBOR_ERR_INDEF_LEN_STRINGS_DISABLED:
-                                                  return ORDINAL_INDEF_LEN_STRINGS_DISABLED;
-        case QCBOR_ERR_INDEF_LEN_ARRAYS_DISABLED: return ORDINAL_INDEF_LEN_ARRAYS_DISABLED;
-        case QCBOR_ERR_TAGS_DISABLED:             return ORDINAL_TAGS_DISABLED;
-        case QCBOR_ERR_TOO_MANY_TAGS:             return ORDINAL_TOO_MANY_TAGS;
-        case QCBOR_ERR_UNEXPECTED_TYPE:           return ORDINAL_UNEXPECTED_TYPE;
-        case QCBOR_ERR_DUPLICATE_LABEL:           return ORDINAL_DUPLICATE_LABEL;
-        case QCBOR_ERR_MEM_POOL_SIZE:             return ORDINAL_MEM_POOL_SIZE;
-        case QCBOR_ERR_INT_OVERFLOW:              return ORDINAL_INT_OVERFLOW;
-        case QCBOR_ERR_DATE_OVERFLOW:             return ORDINAL_DATE_OVERFLOW;
-        case QCBOR_ERR_EXIT_MISMATCH:             return ORDINAL_EXIT_MISMATCH;
-        case QCBOR_ERR_NO_MORE_ITEMS:             return ORDINAL_NO_MORE_ITEMS;
-        case QCBOR_ERR_LABEL_NOT_FOUND:           return ORDINAL_LABEL_NOT_FOUND;
-        case QCBOR_ERR_NUMBER_SIGN_CONVERSION:    return ORDINAL_NUMBER_SIGN_CONVERSION;
-        case QCBOR_ERR_CONVERSION_UNDER_OVER_FLOW:
-                                                  return ORDINAL_CONVERSION_UNDER_OVER_FLOW;
-        case QCBOR_ERR_MAP_NOT_ENTERED:           return ORDINAL_MAP_NOT_ENTERED;
-        case QCBOR_ERR_CALLBACK_FAIL:             return ORDINAL_CALLBACK_FAIL;
-        case QCBOR_ERR_FLOAT_DATE_DISABLED:       return ORDINAL_FLOAT_DATE_DISABLED;
-        case QCBOR_ERR_HALF_PRECISION_DISABLED:   return ORDINAL_HALF_PRECISION_DISABLED;
-        case QCBOR_ERR_HW_FLOAT_DISABLED:         return ORDINAL_HW_FLOAT_DISABLED;
-        case QCBOR_ERR_FLOAT_EXCEPTION:           return ORDINAL_FLOAT_EXCEPTION;
-        case QCBOR_ERR_ALL_FLOAT_DISABLED:        return ORDINAL_ALL_FLOAT_DISABLED;
-        case QCBOR_ERR_RECOVERABLE_BAD_TAG_CONTENT:
-                                                  return ORDINAL_RECOVERABLE_BAD_TAG;
-        case QCBOR_ERR_CANNOT_ENTER_ALLOCATED_STRING:
-                                                  return ORDINAL_CANNOT_ENTER_ALLOCATED;
-        default:                                  return ORDINAL_OTHER;
-    }
-}
 
 /* QCBOR's own text for an error number, as a NUL-terminated string in static
  * storage. Never NULL: `qcbor_err_to_str` answers "Unidentified error" for a
@@ -660,82 +541,6 @@ SyslDecoder *sysl_qcbor_decoder_init(uint64_t *storage, size_t words,
  * dense ordinals, in the declaration order of `ItemKind`.
  */
 
-#define KIND_NONE                       0
-#define KIND_INT                        1
-#define KIND_UINT                       2
-#define KIND_ARRAY                      3
-#define KIND_MAP                        4
-#define KIND_BYTE_STRING                5
-#define KIND_TEXT_STRING                6
-#define KIND_POS_BIGNUM                 7
-#define KIND_NEG_BIGNUM                 8
-#define KIND_DATE_STRING                9
-#define KIND_DATE_EPOCH                10
-#define KIND_UNKNOWN_SIMPLE            11
-#define KIND_DECIMAL_FRACTION          12
-#define KIND_DECIMAL_FRACTION_POS_BIG  13
-#define KIND_DECIMAL_FRACTION_NEG_BIG  14
-#define KIND_BIG_FLOAT                 15
-#define KIND_BIG_FLOAT_POS_BIG         16
-#define KIND_BIG_FLOAT_NEG_BIG         17
-#define KIND_FALSE                     18
-#define KIND_TRUE                      19
-#define KIND_NULL                      20
-#define KIND_UNDEF                     21
-#define KIND_FLOAT                     22
-#define KIND_DOUBLE                    23
-#define KIND_MAP_AS_ARRAY              24
-#define KIND_URI                       25
-#define KIND_BASE64URL                 26
-#define KIND_BASE64                    27
-#define KIND_REGEX                     28
-#define KIND_MIME                      29
-#define KIND_UUID                      30
-#define KIND_BINARY_MIME               31
-#define KIND_DAYS_STRING               32
-#define KIND_DAYS_EPOCH                33
-#define KIND_OTHER                     34
-
-static int kind_of(uint8_t type) {
-    switch (type) {
-        case QCBOR_TYPE_NONE:          return KIND_NONE;
-        case QCBOR_TYPE_INT64:         return KIND_INT;
-        case QCBOR_TYPE_UINT64:        return KIND_UINT;
-        case QCBOR_TYPE_ARRAY:         return KIND_ARRAY;
-        case QCBOR_TYPE_MAP:           return KIND_MAP;
-        case QCBOR_TYPE_BYTE_STRING:   return KIND_BYTE_STRING;
-        case QCBOR_TYPE_TEXT_STRING:   return KIND_TEXT_STRING;
-        case QCBOR_TYPE_POSBIGNUM:     return KIND_POS_BIGNUM;
-        case QCBOR_TYPE_NEGBIGNUM:     return KIND_NEG_BIGNUM;
-        case QCBOR_TYPE_DATE_STRING:   return KIND_DATE_STRING;
-        case QCBOR_TYPE_DATE_EPOCH:    return KIND_DATE_EPOCH;
-        case QCBOR_TYPE_UKNOWN_SIMPLE: return KIND_UNKNOWN_SIMPLE;
-        case QCBOR_TYPE_DECIMAL_FRACTION:            return KIND_DECIMAL_FRACTION;
-        case QCBOR_TYPE_DECIMAL_FRACTION_POS_BIGNUM: return KIND_DECIMAL_FRACTION_POS_BIG;
-        case QCBOR_TYPE_DECIMAL_FRACTION_NEG_BIGNUM: return KIND_DECIMAL_FRACTION_NEG_BIG;
-        case QCBOR_TYPE_BIGFLOAT:                    return KIND_BIG_FLOAT;
-        case QCBOR_TYPE_BIGFLOAT_POS_BIGNUM:         return KIND_BIG_FLOAT_POS_BIG;
-        case QCBOR_TYPE_BIGFLOAT_NEG_BIGNUM:         return KIND_BIG_FLOAT_NEG_BIG;
-        case QCBOR_TYPE_FALSE:         return KIND_FALSE;
-        case QCBOR_TYPE_TRUE:          return KIND_TRUE;
-        case QCBOR_TYPE_NULL:          return KIND_NULL;
-        case QCBOR_TYPE_UNDEF:         return KIND_UNDEF;
-        case QCBOR_TYPE_FLOAT:         return KIND_FLOAT;
-        case QCBOR_TYPE_DOUBLE:        return KIND_DOUBLE;
-        case QCBOR_TYPE_MAP_AS_ARRAY:  return KIND_MAP_AS_ARRAY;
-        case QCBOR_TYPE_URI:           return KIND_URI;
-        case QCBOR_TYPE_BASE64URL:     return KIND_BASE64URL;
-        case QCBOR_TYPE_BASE64:        return KIND_BASE64;
-        case QCBOR_TYPE_REGEX:         return KIND_REGEX;
-        case QCBOR_TYPE_MIME:          return KIND_MIME;
-        case QCBOR_TYPE_UUID:          return KIND_UUID;
-        case QCBOR_TYPE_BINARY_MIME:   return KIND_BINARY_MIME;
-        case QCBOR_TYPE_DAYS_STRING:   return KIND_DAYS_STRING;
-        case QCBOR_TYPE_DAYS_EPOCH:    return KIND_DAYS_EPOCH;
-        default:                       return KIND_OTHER;
-    }
-}
-
 /* -- Traversal ------------------------------------------------------------ */
 
 /* The next item in pre-order, decoded into the wrapper's slot.
@@ -777,8 +582,8 @@ int sysl_qcbor_decode_next_consume(SyslDecoder *d) {
 
 /* -- Reading the decoded item --------------------------------------------- */
 
-int sysl_qcbor_item_kind(const SyslDecoder *d)       { return kind_of(d->item.uDataType); }
-int sysl_qcbor_item_label_kind(const SyslDecoder *d) { return kind_of(d->item.uLabelType); }
+int sysl_qcbor_item_kind(const SyslDecoder *d)       { return d->item.uDataType; }
+int sysl_qcbor_item_label_kind(const SyslDecoder *d) { return d->item.uLabelType; }
 
 uint8_t sysl_qcbor_item_nesting(const SyslDecoder *d)      { return d->item.uNestingLevel; }
 uint8_t sysl_qcbor_item_next_nesting(const SyslDecoder *d) { return d->item.uNextNestLevel; }
@@ -1091,13 +896,13 @@ static int label_of(const uint8_t *p, size_t n, char *out) {
  */
 #define SPIFFY_GET_TAGGED_STR(NAME, QNAME)                                          \
     int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,      \
-             uint8_t req, const uint8_t **p, size_t *n) {                           \
+             int req, const uint8_t **p, size_t *n) {                           \
         UsefulBufC s = NULLUsefulBufC;                                              \
         LABEL_PROLOGUE                                                              \
         switch (lk) {                                                               \
-            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, req, &s);  break; \
-            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, req, &s); break; \
-            default:         QCBORDecode_##QNAME(&d->ctx, req, &s);              break; \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, (uint8_t)req, &s);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, (uint8_t)req, &s); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, (uint8_t)req, &s);              break; \
         }                                                                           \
         *p = (const uint8_t *)s.ptr;                                                \
         *n = s.len;                                                                 \
@@ -1107,12 +912,12 @@ static int label_of(const uint8_t *p, size_t n, char *out) {
 /* A tagged getter with a scalar result -- the two epoch forms. */
 #define SPIFFY_GET_TAGGED(NAME, QNAME, TYPE)                                        \
     int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,      \
-             uint8_t req, TYPE *out) {                                              \
+             int req, TYPE *out) {                                              \
         LABEL_PROLOGUE                                                              \
         switch (lk) {                                                               \
-            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, req, out);  break; \
-            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, req, out); break; \
-            default:         QCBORDecode_##QNAME(&d->ctx, req, out);              break; \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, (uint8_t)req, out);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, (uint8_t)req, out); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, (uint8_t)req, out);              break; \
         }                                                                           \
         return (int)QCBORDecode_GetError(&d->ctx);                                  \
     }
@@ -1250,7 +1055,7 @@ SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_binary_uuid, GetBinaryUUID)
  * choice is made here where a switch is the natural thing to write.
  */
 int sysl_qcbor_get_tagged_str(SyslDecoder *d, int which, int lk, int64_t ln,
-                              const uint8_t *lp, size_t ll, uint8_t req,
+                              const uint8_t *lp, size_t ll, int req,
                               const uint8_t **p, size_t *n) {
     switch (which) {
         case 0:  return sysl_qcbor_get_date_string(d, lk, ln, lp, ll, req, p, n);
@@ -1265,16 +1070,16 @@ int sysl_qcbor_get_tagged_str(SyslDecoder *d, int which, int lk, int64_t ln,
 
 /* A bignum, whose sign is which tag it carried rather than part of its bytes. */
 int sysl_qcbor_get_bignum(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
-                          uint8_t req, const uint8_t **p, size_t *n, int *negative) {
+                          int req, const uint8_t **p, size_t *n, int *negative) {
     UsefulBufC s   = NULLUsefulBufC;
     bool       neg = false;
 
     LABEL_PROLOGUE
 
     switch (lk) {
-        case LABEL_INT:  QCBORDecode_GetBignumInMapN(&d->ctx, ln, req, &s, &neg);  break;
-        case LABEL_TEXT: QCBORDecode_GetBignumInMapSZ(&d->ctx, sz, req, &s, &neg); break;
-        default:         QCBORDecode_GetBignum(&d->ctx, req, &s, &neg);            break;
+        case LABEL_INT:  QCBORDecode_GetBignumInMapN(&d->ctx, ln, (uint8_t)req, &s, &neg);  break;
+        case LABEL_TEXT: QCBORDecode_GetBignumInMapSZ(&d->ctx, sz, (uint8_t)req, &s, &neg); break;
+        default:         QCBORDecode_GetBignum(&d->ctx, (uint8_t)req, &s, &neg);            break;
     }
 
     *p        = (const uint8_t *)s.ptr;
@@ -1289,7 +1094,7 @@ int sysl_qcbor_get_bignum(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp,
  * which it got.
  */
 int sysl_qcbor_get_mime(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
-                        uint8_t req, const uint8_t **p, size_t *n, int *is_binary) {
+                        int req, const uint8_t **p, size_t *n, int *is_binary) {
     UsefulBufC s      = NULLUsefulBufC;
     bool       binary = false;
 
@@ -1297,13 +1102,13 @@ int sysl_qcbor_get_mime(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, s
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetMIMEMessageInMapN(&d->ctx, ln, req, &s, &binary);
+            QCBORDecode_GetMIMEMessageInMapN(&d->ctx, ln, (uint8_t)req, &s, &binary);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetMIMEMessageInMapSZ(&d->ctx, sz, req, &s, &binary);
+            QCBORDecode_GetMIMEMessageInMapSZ(&d->ctx, sz, (uint8_t)req, &s, &binary);
             break;
         default:
-            QCBORDecode_GetMIMEMessage(&d->ctx, req, &s, &binary);
+            QCBORDecode_GetMIMEMessage(&d->ctx, (uint8_t)req, &s, &binary);
             break;
     }
 
@@ -1321,19 +1126,19 @@ int sysl_qcbor_get_mime(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, s
  */
 
 int sysl_qcbor_get_decimal_fraction(SyslDecoder *d, int lk, int64_t ln,
-                                    const uint8_t *lp, size_t ll, uint8_t req,
+                                    const uint8_t *lp, size_t ll, int req,
                                     int64_t *mantissa, int64_t *exponent) {
     LABEL_PROLOGUE
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetDecimalFractionInMapN(&d->ctx, ln, req, mantissa, exponent);
+            QCBORDecode_GetDecimalFractionInMapN(&d->ctx, ln, (uint8_t)req, mantissa, exponent);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetDecimalFractionInMapSZ(&d->ctx, sz, req, mantissa, exponent);
+            QCBORDecode_GetDecimalFractionInMapSZ(&d->ctx, sz, (uint8_t)req, mantissa, exponent);
             break;
         default:
-            QCBORDecode_GetDecimalFraction(&d->ctx, req, mantissa, exponent);
+            QCBORDecode_GetDecimalFraction(&d->ctx, (uint8_t)req, mantissa, exponent);
             break;
     }
 
@@ -1341,19 +1146,19 @@ int sysl_qcbor_get_decimal_fraction(SyslDecoder *d, int lk, int64_t ln,
 }
 
 int sysl_qcbor_get_big_float(SyslDecoder *d, int lk, int64_t ln,
-                             const uint8_t *lp, size_t ll, uint8_t req,
+                             const uint8_t *lp, size_t ll, int req,
                              int64_t *mantissa, int64_t *exponent) {
     LABEL_PROLOGUE
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetBigFloatInMapN(&d->ctx, ln, req, mantissa, exponent);
+            QCBORDecode_GetBigFloatInMapN(&d->ctx, ln, (uint8_t)req, mantissa, exponent);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetBigFloatInMapSZ(&d->ctx, sz, req, mantissa, exponent);
+            QCBORDecode_GetBigFloatInMapSZ(&d->ctx, sz, (uint8_t)req, mantissa, exponent);
             break;
         default:
-            QCBORDecode_GetBigFloat(&d->ctx, req, mantissa, exponent);
+            QCBORDecode_GetBigFloat(&d->ctx, (uint8_t)req, mantissa, exponent);
             break;
     }
 
@@ -1369,7 +1174,7 @@ int sysl_qcbor_get_big_float(SyslDecoder *d, int lk, int64_t ln,
  * which is why the sysl side hands back a slice rather than an offset.
  */
 int sysl_qcbor_get_decimal_fraction_big(SyslDecoder *d, int lk, int64_t ln,
-                                        const uint8_t *lp, size_t ll, uint8_t req,
+                                        const uint8_t *lp, size_t ll, int req,
                                         uint8_t *scratch, size_t scratch_len,
                                         const uint8_t **p, size_t *n, int *negative,
                                         int64_t *exponent) {
@@ -1384,13 +1189,13 @@ int sysl_qcbor_get_decimal_fraction_big(SyslDecoder *d, int lk, int64_t ln,
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetDecimalFractionBigInMapN(&d->ctx, ln, req, buf, &s, &neg, exponent);
+            QCBORDecode_GetDecimalFractionBigInMapN(&d->ctx, ln, (uint8_t)req, buf, &s, &neg, exponent);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetDecimalFractionBigInMapSZ(&d->ctx, sz, req, buf, &s, &neg, exponent);
+            QCBORDecode_GetDecimalFractionBigInMapSZ(&d->ctx, sz, (uint8_t)req, buf, &s, &neg, exponent);
             break;
         default:
-            QCBORDecode_GetDecimalFractionBig(&d->ctx, req, buf, &s, &neg, exponent);
+            QCBORDecode_GetDecimalFractionBig(&d->ctx, (uint8_t)req, buf, &s, &neg, exponent);
             break;
     }
 
@@ -1402,7 +1207,7 @@ int sysl_qcbor_get_decimal_fraction_big(SyslDecoder *d, int lk, int64_t ln,
 }
 
 int sysl_qcbor_get_big_float_big(SyslDecoder *d, int lk, int64_t ln,
-                                 const uint8_t *lp, size_t ll, uint8_t req,
+                                 const uint8_t *lp, size_t ll, int req,
                                  uint8_t *scratch, size_t scratch_len,
                                  const uint8_t **p, size_t *n, int *negative,
                                  int64_t *exponent) {
@@ -1417,13 +1222,13 @@ int sysl_qcbor_get_big_float_big(SyslDecoder *d, int lk, int64_t ln,
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetBigFloatBigInMapN(&d->ctx, ln, req, buf, &s, &neg, exponent);
+            QCBORDecode_GetBigFloatBigInMapN(&d->ctx, ln, (uint8_t)req, buf, &s, &neg, exponent);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetBigFloatBigInMapSZ(&d->ctx, sz, req, buf, &s, &neg, exponent);
+            QCBORDecode_GetBigFloatBigInMapSZ(&d->ctx, sz, (uint8_t)req, buf, &s, &neg, exponent);
             break;
         default:
-            QCBORDecode_GetBigFloatBig(&d->ctx, req, buf, &s, &neg, exponent);
+            QCBORDecode_GetBigFloatBig(&d->ctx, (uint8_t)req, buf, &s, &neg, exponent);
             break;
     }
 
@@ -1521,7 +1326,7 @@ int sysl_qcbor_get_array_bytes(SyslDecoder *d, int lk, int64_t ln, const uint8_t
  * the decoding half of the encoder's `bstr_wrap`, and how COSE reads a payload.
  */
 int sysl_qcbor_enter_bstr_wrapped(SyslDecoder *d, int lk, int64_t ln,
-                                  const uint8_t *lp, size_t ll, uint8_t req,
+                                  const uint8_t *lp, size_t ll, int req,
                                   const uint8_t **p, size_t *n) {
     UsefulBufC s = NULLUsefulBufC;
 
@@ -1529,13 +1334,13 @@ int sysl_qcbor_enter_bstr_wrapped(SyslDecoder *d, int lk, int64_t ln,
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_EnterBstrWrappedFromMapN(&d->ctx, ln, req, &s);
+            QCBORDecode_EnterBstrWrappedFromMapN(&d->ctx, ln, (uint8_t)req, &s);
             break;
         case LABEL_TEXT:
-            QCBORDecode_EnterBstrWrappedFromMapSZ(&d->ctx, sz, req, &s);
+            QCBORDecode_EnterBstrWrappedFromMapSZ(&d->ctx, sz, (uint8_t)req, &s);
             break;
         default:
-            QCBORDecode_EnterBstrWrapped(&d->ctx, req, &s);
+            QCBORDecode_EnterBstrWrapped(&d->ctx, (uint8_t)req, &s);
             break;
     }
 
@@ -1597,29 +1402,6 @@ int sysl_qcbor_get_item_in_map(SyslDecoder *d, int lk, int64_t ln,
  * pool. A label too long for what is left is refused rather than truncated.
  * ===================================================================== */
 
-/* Chosen rather than derived: QCBOR has no limit of its own here, and a list is
- * the labels of one map read by one schema. Sixteen is past what that is in
- * practice, and the cost of being wrong is a clean refusal.
- */
-#define SYSL_ITEMS_MAX  16
-#define SYSL_LABEL_POOL 512
-
-typedef struct {
-    /* One more than the maximum, because the list is terminated by an entry of
-     * type QCBOR_TYPE_NONE and that entry has to fit.
-     */
-    QCBORItem items[SYSL_ITEMS_MAX + 1];
-    char      pool[SYSL_LABEL_POOL];
-    size_t    used;
-    size_t    count;
-} SyslItemList;
-
-size_t sysl_qcbor_items_words(void) {
-    return (sizeof(SyslItemList) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
-}
-
-size_t sysl_qcbor_items_capacity(void) { return SYSL_ITEMS_MAX; }
-
 SyslItemList *sysl_qcbor_items_init(uint64_t *storage, size_t words) {
     SyslItemList *l;
 
@@ -1634,27 +1416,6 @@ SyslItemList *sysl_qcbor_items_init(uint64_t *storage, size_t words) {
     return l;
 }
 
-/* The QCBOR type a sysl `ItemKind` ordinal asks for, or QCBOR_TYPE_ANY where
- * the caller will inspect the kind themselves.
- */
-static uint8_t qcbor_type_of(int kind) {
-    switch (kind) {
-        case KIND_INT:         return QCBOR_TYPE_INT64;
-        case KIND_UINT:        return QCBOR_TYPE_UINT64;
-        case KIND_ARRAY:       return QCBOR_TYPE_ARRAY;
-        case KIND_MAP:         return QCBOR_TYPE_MAP;
-        case KIND_BYTE_STRING: return QCBOR_TYPE_BYTE_STRING;
-        case KIND_TEXT_STRING: return QCBOR_TYPE_TEXT_STRING;
-        case KIND_FALSE:       return QCBOR_TYPE_FALSE;
-        case KIND_TRUE:        return QCBOR_TYPE_TRUE;
-        case KIND_NULL:        return QCBOR_TYPE_NULL;
-        case KIND_UNDEF:       return QCBOR_TYPE_UNDEF;
-        case KIND_DOUBLE:      return QCBOR_TYPE_DOUBLE;
-        case KIND_DATE_EPOCH:  return QCBOR_TYPE_DATE_EPOCH;
-        default:               return QCBOR_TYPE_ANY;
-    }
-}
-
 /* Ask for one more label. Answers 0 on success, 1 when the list is full, and
  * 2 when the label pool is.
  */
@@ -1667,7 +1428,7 @@ int sysl_qcbor_items_want_at(SyslItemList *l, int64_t label, int kind) {
 
     l->items[l->count].uLabelType  = QCBOR_TYPE_INT64;
     l->items[l->count].label.int64 = label;
-    l->items[l->count].uDataType   = qcbor_type_of(kind);
+    l->items[l->count].uDataType   = (uint8_t)kind;
 
     l->count++;
 
@@ -1701,7 +1462,7 @@ int sysl_qcbor_items_want(SyslItemList *l, const uint8_t *label, size_t label_le
     l->items[l->count].uLabelType        = QCBOR_TYPE_TEXT_STRING;
     l->items[l->count].label.string.ptr  = slot;
     l->items[l->count].label.string.len  = label_len;
-    l->items[l->count].uDataType         = qcbor_type_of(kind);
+    l->items[l->count].uDataType         = (uint8_t)kind;
 
     l->count++;
 

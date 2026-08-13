@@ -7,15 +7,21 @@
  * on their own, outside `shim.c`. So anything a constant is measured from has
  * to be declared somewhere both can include -- which is what a header is for.
  *
- * `SyslDecoder` is the whole of it. The rest of what `qcbor.sysl` measures --
- * the tag numbers, `QCBOR_HEAD_BUFFER_SIZE`, `sizeof(QCBOREncodeContext)` --
- * comes from QCBOR's own headers, which are included below and therefore come
- * with it.
+ * `SyslDecoder` and `SyslItemList` are the whole of it. The rest of what the
+ * `c` module measures -- the tag numbers, the error and item-type numbers,
+ * `QCBOR_HEAD_BUFFER_SIZE`, `sizeof(QCBOREncodeContext)` -- comes from QCBOR's
+ * own headers, which are included below and therefore come with it.
  */
 #ifndef SYSL_QCBOR_SHIM_H
 #define SYSL_QCBOR_SHIM_H
 
 #include "qcbor.h"
+
+/* The spiffy-decode half is a separate header and `qcbor.h` does not pull it
+ * in. The `c` module measures its tag-requirement and conversion constants, so
+ * it is named here rather than only in `shim.c`.
+ */
+#include "qcbor_spiffy_decode.h"
 
 /* A caller's own string allocator, in the shape sysl can express.
  *
@@ -58,5 +64,28 @@ typedef struct {
     SyslAllocate       allocate;
     void              *allocate_ctx;
 } SyslDecoder;
+
+/* The batch list a `get_items` run fills: the labels asked for, storage for
+ * their bytes, and the QCBORItem each answer lands in.
+ *
+ * It is here rather than in `shim.c` for the same reason `SyslDecoder` is: a
+ * `c const` block measures it, and a constant is compiled outside the shim.
+ *
+ * SYSL_ITEMS_MAX is chosen rather than derived -- QCBOR has no limit of its own
+ * here, and a list is the labels of one map read by one schema. Sixteen is past
+ * what that is in practice, and the cost of being wrong is a clean refusal.
+ */
+#define SYSL_ITEMS_MAX  16
+#define SYSL_LABEL_POOL 512
+
+typedef struct {
+    /* One more than the maximum, because the list is terminated by an entry of
+     * type QCBOR_TYPE_NONE and that entry has to fit.
+     */
+    QCBORItem items[SYSL_ITEMS_MAX + 1];
+    char      pool[SYSL_LABEL_POOL];
+    size_t    used;
+    size_t    count;
+} SyslItemList;
 
 #endif

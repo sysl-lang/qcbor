@@ -11,9 +11,6 @@ import sysl.slices.{as_ptr, as_mut_ptr}
 
 
 
-
-
-
 // What a decoded item is. The names are CBOR's and QCBOR's, and the order is `shim.c`'s `KIND_` list
 // -- the same arrangement `ErrorKind` uses and for the same reason.
 //
@@ -65,9 +62,95 @@ enum ItemKind
     DaysEpoch
     // A type this binding has not heard of, which a QCBOR newer than it may produce.
     Unrecognized
+
+    // The arm QCBOR's own `QCBORItem.uDataType` lands on.
+    //
+    // **The correspondence used to be positional and unchecked**: `shim.c` held a `KIND_` list whose
+    // numbering had to run down the variants above in the same order, and nothing compared the two.
+    // QCBOR's numbers are sparse and run past 78 with gaps, which is why the shim translated at all;
+    // a `match` handles a sparse set as easily as a dense one, so the translation is here now and
+    // the C hands over what QCBOR actually said.
+    of(code: int) -> ItemKind
+        code match
+            c.TYPE_NONE -> Unset
+            c.TYPE_INT64 -> Int
+            c.TYPE_UINT64 -> Uint
+            c.TYPE_ARRAY -> Array
+            c.TYPE_MAP -> Map
+            c.TYPE_BYTE_STRING -> ByteString
+            c.TYPE_TEXT_STRING -> TextString
+            c.TYPE_POSBIGNUM -> PosBignum
+            c.TYPE_NEGBIGNUM -> NegBignum
+            c.TYPE_DATE_STRING -> DateString
+            c.TYPE_DATE_EPOCH -> DateEpoch
+            c.TYPE_UKNOWN_SIMPLE -> UnknownSimple
+            c.TYPE_DECIMAL_FRACTION -> DecimalFraction
+            c.TYPE_DECIMAL_FRACTION_POS_BIGNUM -> DecimalFractionPosBignum
+            c.TYPE_DECIMAL_FRACTION_NEG_BIGNUM -> DecimalFractionNegBignum
+            c.TYPE_BIGFLOAT -> BigFloat
+            c.TYPE_BIGFLOAT_POS_BIGNUM -> BigFloatPosBignum
+            c.TYPE_BIGFLOAT_NEG_BIGNUM -> BigFloatNegBignum
+            c.TYPE_FALSE -> False
+            c.TYPE_TRUE -> True
+            c.TYPE_NULL -> Null
+            c.TYPE_UNDEF -> Undef
+            c.TYPE_FLOAT -> Float
+            c.TYPE_DOUBLE -> Double
+            c.TYPE_MAP_AS_ARRAY -> MapAsArray
+            c.TYPE_URI -> Uri
+            c.TYPE_BASE64URL -> Base64Url
+            c.TYPE_BASE64 -> Base64
+            c.TYPE_REGEX -> Regex
+            c.TYPE_MIME -> Mime
+            c.TYPE_UUID -> Uuid
+            c.TYPE_BINARY_MIME -> BinaryMime
+            c.TYPE_DAYS_STRING -> DaysString
+            c.TYPE_DAYS_EPOCH -> DaysEpoch
+            _ -> Unrecognized
 end ItemKind
 
-private[qcbor] item_kind(ordinal: int) -> ItemKind = ItemKind.try(ordinal).unwrap_or(Unrecognized)
+// An item's kind prints as the CBOR name for it, so a reader that meets something unexpected says
+// what it met.
+impl Display for ItemKind
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Unset -> "no item"
+            Int -> "signed integer"
+            Uint -> "unsigned integer"
+            Array -> "array"
+            Map -> "map"
+            ByteString -> "byte string"
+            TextString -> "text string"
+            PosBignum -> "positive bignum"
+            NegBignum -> "negative bignum"
+            DateString -> "date string"
+            DateEpoch -> "date epoch"
+            UnknownSimple -> "an unnamed simple value"
+            DecimalFraction -> "decimal fraction"
+            DecimalFractionPosBignum -> "decimal fraction with a positive bignum mantissa"
+            DecimalFractionNegBignum -> "decimal fraction with a negative bignum mantissa"
+            BigFloat -> "big float"
+            BigFloatPosBignum -> "big float with a positive bignum mantissa"
+            BigFloatNegBignum -> "big float with a negative bignum mantissa"
+            False -> "false"
+            True -> "true"
+            Null -> "null"
+            Undef -> "undefined"
+            Float -> "float"
+            Double -> "double"
+            MapAsArray -> "map as array"
+            Uri -> "URI"
+            Base64Url -> "base64url"
+            Base64 -> "base64"
+            Regex -> "regex"
+            Mime -> "MIME"
+            Uuid -> "UUID"
+            BinaryMime -> "binary MIME"
+            DaysString -> "days string"
+            DaysEpoch -> "days epoch"
+            Unrecognized -> "unrecognized"
+
+        display_str(s, out, fmt)
 
 // How a map's labels are read.
 enum DecodeMode
@@ -83,9 +166,15 @@ enum DecodeMode
     // is one item that arrived that way -- and because two variants of one module may not share a
     // name, since a variant is reached unqualified.
     MapsAsArrays
-end DecodeMode
 
-private[qcbor] mode_number(m: DecodeMode) -> int = int(m)
+    // QCBOR's own number for it. This used to be `int(self)` against a switch in `shim.c` keyed on
+    // 0, 1 and 2 -- a third positional agreement with a declaration order in another language.
+    code(self) -> int
+        self match
+            Normal -> c.DECODE_MODE_NORMAL
+            MapStringsOnly -> c.DECODE_MODE_MAP_STRINGS_ONLY
+            MapsAsArrays -> c.DECODE_MODE_MAP_AS_ARRAY
+end DecodeMode
 
 // A decoder walking one buffer of CBOR.
 //
@@ -379,7 +468,7 @@ struct Decoder
     // been through more than one implementation needs: an amount written as an integer by one peer
     // and as a float by another is one number to the reader.
     //
-    // `conversions` is a set of bits -- `convert_xint64()`, `convert_float()` and the rest, OR'd
+    // `conversions` is a set of bits -- `convert_xint64()`, `convert_float` and the rest, OR'd
     // together. The `_all` forms additionally accept the types that need arithmetic to convert: a
     // bignum, a decimal fraction, a big float. **Those are the calls that reach `pow` and `exp2`**,
     // which is the whole reason this module names the mathematics in its `@link`.
@@ -485,7 +574,7 @@ struct Decoder
     private epoch(self, lk: int, ln: long, lb: []const u8, tags: TagRequirement,
                   seconds: bool) -> Result[long, Error]
         var v: long = 0
-        val req = c.tag_requirement(int(tags))
+        val req = tags.code()
         var err: int = 0
 
         if seconds then
@@ -552,7 +641,7 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        val req = c.tag_requirement(int(tags))
+        val req = tags.code()
 
         str_result(c.get_tagged_str(self.handle, which, lk, ln, as_ptr(lb), lb.len, req, &p, &n), p, n)
     end tagged_str
@@ -572,7 +661,7 @@ struct Decoder
         var n: usize = 0
         var negative: int = 0
 
-        val err = c.get_bignum(self.handle, lk, ln, as_ptr(lb), lb.len, c.tag_requirement(int(tags)),
+        val err = c.get_bignum(self.handle, lk, ln, as_ptr(lb), lb.len, tags.code(),
                                &p, &n, &negative)
 
         if err != 0 then
@@ -597,7 +686,7 @@ struct Decoder
         var n: usize = 0
         var binary: int = 0
 
-        val err = c.get_mime(self.handle, lk, ln, as_ptr(lb), lb.len, c.tag_requirement(int(tags)), &p, &n, &binary)
+        val err = c.get_mime(self.handle, lk, ln, as_ptr(lb), lb.len, tags.code(), &p, &n, &binary)
 
         if err != 0 then
             Err(Error(err))
@@ -630,7 +719,7 @@ struct Decoder
         var mantissa: long = 0
         var exponent: long = 0
 
-        val req = c.tag_requirement(int(tags))
+        val req = tags.code()
         var err: int = 0
 
         if decimal then
@@ -674,7 +763,7 @@ struct Decoder
         var negative: int = 0
         var exponent: long = 0
 
-        val req = c.tag_requirement(int(tags))
+        val req = tags.code()
         var err: int = 0
 
         if decimal then
@@ -760,7 +849,7 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c.enter_bstr_wrapped(self.handle, lk, ln, as_ptr(lb), lb.len, c.tag_requirement(int(tags)),
+        str_result(c.enter_bstr_wrapped(self.handle, lk, ln, as_ptr(lb), lb.len, tags.code(),
                                         &p, &n), p, n)
     end bstr_by
 
@@ -801,7 +890,7 @@ struct Decoder
     //
     // **`check` is a C function pointer**, which is what QCBOR takes and what `12 §6a` spells
     // `*extern`. It is handed this decoder as its first argument and the unmatched item as its
-    // second; `staged` turns those two into an `Item`. Answering anything but `callback_ok()` stops
+    // second; `staged` turns those two into an `Item`. Answering anything but `callback_ok` stops
     // the traversal with that error.
     get_items_checking(self, list: ItemList,
                        check: *extern(*u8, *u8) -> int) -> Result[unit, Error] =
@@ -826,3 +915,13 @@ staged(ctx: *u8, item: *u8) -> Item
     c.item_stage(handle, item)
     Item(Decoder([], [], handle))
 end staged
+
+// The mode a decoder was made with, for a program that reports its own configuration.
+impl Display for DecodeMode
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Normal -> "normal"
+            MapStringsOnly -> "map strings only"
+            MapsAsArrays -> "maps as arrays"
+
+        display_str(s, out, fmt)

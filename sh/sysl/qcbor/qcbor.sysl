@@ -1,18 +1,18 @@
 module sh.sysl.qcbor
 
 import sh.sysl.qcbor.c
-import sh.sysl.qcbor.c.{cbor_tag_date_string, cbor_tag_date_epoch, cbor_tag_pos_bignum,
-                       cbor_tag_neg_bignum, cbor_tag_decimal_fraction, cbor_tag_bigfloat,
-                       cbor_tag_cose_encrypt0, cbor_tag_cose_mac0, cbor_tag_cose_sign1,
-                       cbor_tag_enc_as_b64url, cbor_tag_enc_as_b64, cbor_tag_enc_as_b16,
-                       cbor_tag_cbor, cbor_tag_uri, cbor_tag_b64url, cbor_tag_b64, cbor_tag_regex,
-                       cbor_tag_mime, cbor_tag_bin_uuid, cbor_tag_cwt, cbor_tag_cbor_sequence,
-                       cbor_tag_cose_encrypt, cbor_tag_cose_mac, cbor_tag_cose_sign,
-                       cbor_tag_days_epoch, cbor_tag_days_string, cbor_tag_geo_coord,
-                       cbor_tag_binary_mime, cbor_tag_cbor_magic, cbor_tag_invalid64,
-                       encode_context_words, head_buffer_size, decode_context_words,
-                       qcbor_max_tags_per_item, decode_min_mem_pool_size,
-                       count_indicates_indefinite_length}
+import sh.sysl.qcbor.c.{TAG_DATE_STRING, TAG_DATE_EPOCH, TAG_POS_BIGNUM,
+                       TAG_NEG_BIGNUM, TAG_DECIMAL_FRACTION, TAG_BIGFLOAT,
+                       TAG_COSE_ENCRYPT0, TAG_COSE_MAC0, TAG_COSE_SIGN1,
+                       TAG_ENC_AS_B64URL, TAG_ENC_AS_B64, TAG_ENC_AS_B16,
+                       TAG_CBOR, TAG_URI, TAG_B64URL, TAG_B64, TAG_REGEX,
+                       TAG_MIME, TAG_BIN_UUID, TAG_CWT, TAG_CBOR_SEQUENCE,
+                       TAG_COSE_ENCRYPT, TAG_COSE_MAC, TAG_COSE_SIGN,
+                       TAG_DAYS_EPOCH, TAG_DAYS_STRING, TAG_GEO_COORD,
+                       TAG_BINARY_MIME, TAG_CBOR_MAGIC, TAG_INVALID64,
+                       ENCODE_CONTEXT_WORDS, HEAD_BUFFER_SIZE, DECODE_CONTEXT_WORDS,
+                       MAX_TAGS_PER_ITEM, DECODE_MIN_MEM_POOL_SIZE,
+                       COUNT_INDICATES_INDEFINITE_LENGTH}
 import sysl.text.from_cstring
 
 // CBOR (RFC 8949), bound to QCBOR 1.6.1.
@@ -66,7 +66,7 @@ struct Error
     // know, and the bytes are static storage in C, so the decode cannot fail on a dangling pointer.
     message(self) -> string = from_cstring_or(c.error_message(self.code), "unidentified error")
 
-    kind(self) -> ErrorKind = error_kind(c.error_ordinal(self.code))
+    kind(self) -> ErrorKind = ErrorKind.of(self.code)
 
     // Whether the input is not CBOR at all, as against CBOR this decoder would not accept. The
     // distinction matters to a protocol that must tell a corrupt message from an unsupported one.
@@ -144,21 +144,131 @@ enum ErrorKind
     RecoverableBadTagContent
     CannotEnterAllocatedString
     Other
+
+    // QCBOR's number for this failure, and the arm a number lands on.
+    //
+    // **The correspondence used to be positional and unchecked**: `shim.c` held an `ORDINAL_` list
+    // whose numbering had to run down the variants above in the same order, and nothing compared the
+    // two. It is a `match` against `sh.sysl.qcbor.c` now, so a QCBOR name that does not exist is a
+    // compile error and a variant with no arm is one too.
+    of(code: int) -> ErrorKind
+        code match
+            c.SUCCESS -> Success
+            c.ERR_BUFFER_TOO_SMALL -> BufferTooSmall
+            c.ERR_ENCODE_UNSUPPORTED -> EncodeUnsupported
+            c.ERR_BUFFER_TOO_LARGE -> BufferTooLarge
+            c.ERR_ARRAY_NESTING_TOO_DEEP -> ArrayNestingTooDeep
+            c.ERR_CLOSE_MISMATCH -> CloseMismatch
+            c.ERR_ARRAY_TOO_LONG -> ArrayTooLong
+            c.ERR_TOO_MANY_CLOSES -> TooManyCloses
+            c.ERR_ARRAY_OR_MAP_STILL_OPEN -> ArrayOrMapStillOpen
+            c.ERR_OPEN_BYTE_STRING -> OpenByteString
+            c.ERR_CANNOT_CANCEL -> CannotCancel
+            c.ERR_EXTRA_BYTES -> ExtraBytes
+            c.ERR_UNSUPPORTED -> Unsupported
+            c.ERR_ARRAY_OR_MAP_UNCONSUMED -> ArrayOrMapUnconsumed
+            c.ERR_BAD_INT -> BadInt
+            c.ERR_INDEFINITE_STRING_CHUNK -> IndefiniteStringChunk
+            c.ERR_HIT_END -> HitEnd
+            c.ERR_BAD_BREAK -> BadBreak
+            c.ERR_INPUT_TOO_LARGE -> InputTooLarge
+            c.ERR_ARRAY_DECODE_NESTING_TOO_DEEP -> ArrayDecodeNestingTooDeep
+            c.ERR_ARRAY_DECODE_TOO_LONG -> ArrayDecodeTooLong
+            c.ERR_STRING_TOO_LONG -> StringTooLong
+            c.ERR_BAD_EXP_AND_MANTISSA -> BadExpAndMantissa
+            c.ERR_NO_STRING_ALLOCATOR -> NoStringAllocator
+            c.ERR_STRING_ALLOCATE -> StringAllocate
+            c.ERR_MAP_LABEL_TYPE -> MapLabelType
+            c.ERR_BAD_TAG_CONTENT -> BadTagContent
+            c.ERR_INDEF_LEN_STRINGS_DISABLED -> IndefLenStringsDisabled
+            c.ERR_INDEF_LEN_ARRAYS_DISABLED -> IndefLenArraysDisabled
+            c.ERR_TAGS_DISABLED -> TagsDisabled
+            c.ERR_TOO_MANY_TAGS -> TooManyTags
+            c.ERR_UNEXPECTED_TYPE -> UnexpectedType
+            c.ERR_DUPLICATE_LABEL -> DuplicateLabel
+            c.ERR_MEM_POOL_SIZE -> MemPoolSize
+            c.ERR_INT_OVERFLOW -> IntOverflow
+            c.ERR_DATE_OVERFLOW -> DateOverflow
+            c.ERR_EXIT_MISMATCH -> ExitMismatch
+            c.ERR_NO_MORE_ITEMS -> NoMoreItems
+            c.ERR_LABEL_NOT_FOUND -> LabelNotFound
+            c.ERR_NUMBER_SIGN_CONVERSION -> NumberSignConversion
+            c.ERR_CONVERSION_UNDER_OVER_FLOW -> ConversionUnderOverFlow
+            c.ERR_MAP_NOT_ENTERED -> MapNotEntered
+            c.ERR_CALLBACK_FAIL -> CallbackFail
+            c.ERR_FLOAT_DATE_DISABLED -> FloatDateDisabled
+            c.ERR_HALF_PRECISION_DISABLED -> HalfPrecisionDisabled
+            c.ERR_HW_FLOAT_DISABLED -> HwFloatDisabled
+            c.ERR_FLOAT_EXCEPTION -> FloatException
+            c.ERR_ALL_FLOAT_DISABLED -> AllFloatDisabled
+            c.ERR_RECOVERABLE_BAD_TAG_CONTENT -> RecoverableBadTagContent
+            c.ERR_CANNOT_ENTER_ALLOCATED_STRING -> CannotEnterAllocatedString
+            _ -> Other
 end ErrorKind
 
-// **The declaration order above IS the agreement with `shim.c`**, whose `ORDINAL_` list runs down the
-// same names in the same order. Nothing restates it here: the discriminants are implicit, so they are
-// 0 upward in declaration order, and `try` is the fallible constructor `09 §2` provides for exactly
-// this -- an integer off a wire, or out of a C shim, that may not be a declared value.
-//
-// A number this binding has not heard of lands on `Other` rather than trapping, which is what keeps
-// a program running against a QCBOR newer than the list.
-//
 // Comparing two kinds is what a caller branching on a failure does, and it needs nothing written
-// here: a simple enum *is* its discriminant, so it carries `==` by rule (`09 §2`, `14 §5`). This
-// binding used to say that itself, in an `impl Eq` performing the same comparison.
-private error_kind(ordinal: int) -> ErrorKind = ErrorKind.try(ordinal).unwrap_or(Other)
+// here: a simple enum *is* its discriminant, so it carries `==` by rule (`09 §2`, `14 §5`).
 
+
+// A kind prints as the failure it names. `Error` prints QCBOR's own sentence instead, which is
+// longer and more specific; this is the one to reach for when reporting which *class* of failure
+// a protocol saw.
+impl Display for ErrorKind
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Success -> "success"
+            BufferTooSmall -> "the buffer is too small"
+            EncodeUnsupported -> "encode unsupported"
+            BufferTooLarge -> "buffer too large"
+            ArrayNestingTooDeep -> "array nesting too deep"
+            CloseMismatch -> "close mismatch"
+            ArrayTooLong -> "array too long"
+            TooManyCloses -> "too many closes"
+            ArrayOrMapStillOpen -> "an array or map is still open"
+            OpenByteString -> "open byte string"
+            CannotCancel -> "cannot cancel"
+            ExtraBytes -> "extra bytes"
+            Unsupported -> "unsupported"
+            ArrayOrMapUnconsumed -> "an array or map was left unconsumed"
+            BadInt -> "bad int"
+            IndefiniteStringChunk -> "indefinite string chunk"
+            HitEnd -> "hit end"
+            BadBreak -> "bad break"
+            InputTooLarge -> "input too large"
+            ArrayDecodeNestingTooDeep -> "array decode nesting too deep"
+            ArrayDecodeTooLong -> "array decode too long"
+            StringTooLong -> "string too long"
+            BadExpAndMantissa -> "bad exponent and mantissa"
+            NoStringAllocator -> "no string allocator"
+            StringAllocate -> "string allocate"
+            MapLabelType -> "map label type"
+            BadTagContent -> "bad tag content"
+            IndefLenStringsDisabled -> "indefinite-length strings disabled"
+            IndefLenArraysDisabled -> "indefinite-length arrays disabled"
+            TagsDisabled -> "tags disabled"
+            TooManyTags -> "too many tags"
+            UnexpectedType -> "unexpected type"
+            DuplicateLabel -> "duplicate label"
+            MemPoolSize -> "mem pool size"
+            IntOverflow -> "int overflow"
+            DateOverflow -> "date overflow"
+            ExitMismatch -> "exit mismatch"
+            NoMoreItems -> "no more items"
+            LabelNotFound -> "label not found"
+            NumberSignConversion -> "the sign will not convert"
+            ConversionUnderOverFlow -> "conversion out of range"
+            MapNotEntered -> "map not entered"
+            CallbackFail -> "callback fail"
+            FloatDateDisabled -> "float date disabled"
+            HalfPrecisionDisabled -> "half precision disabled"
+            HwFloatDisabled -> "hardware float disabled"
+            FloatException -> "float exception"
+            AllFloatDisabled -> "all float disabled"
+            RecoverableBadTagContent -> "bad tag content, recoverable"
+            CannotEnterAllocatedString -> "an allocated string cannot be entered"
+            Other -> "other"
+
+        display_str(s, out, fmt)
 
 // ==================================================================================================
 // The tag numbers RFC 8949 and the CBOR registry assign, and the sizes QCBOR imposes
@@ -170,7 +280,7 @@ private error_kind(ordinal: int) -> ErrorKind = ErrorKind.try(ordinal).unwrap_or
 //
 // **The `c const` block that asks for them is in `sh.sysl.qcbor.c`, under C's own spelling**, and
 // every one is named again here under the pleasant one. That is the two-layer split applied to
-// values rather than to functions: `cbor_tag_cwt` is what the header calls it and `tag_cwt` is what
+// values rather than to functions: `TAG_CWT` is what the header calls it and `tag_cwt` is what
 // a program should write.
 //
 // It also sidesteps card 0104. A **module-qualified** `c const` is not recognised as a constant --
@@ -181,46 +291,46 @@ private error_kind(ordinal: int) -> ErrorKind = ErrorKind.try(ordinal).unwrap_or
 // ==================================================================================================
 
 // An RFC 3339 date, as text.
-const tag_date_string: u64 = cbor_tag_date_string
+const tag_date_string: u64 = TAG_DATE_STRING
 // Seconds since 1970-01-01, as an integer or a float.
-const tag_date_epoch: u64 = cbor_tag_date_epoch
+const tag_date_epoch: u64 = TAG_DATE_EPOCH
 // An arbitrary-precision integer, big-endian, in a byte string.
-const tag_pos_bignum: u64 = cbor_tag_pos_bignum
+const tag_pos_bignum: u64 = TAG_POS_BIGNUM
 // The same, for a negative value: the bytes encode -1 minus the number.
-const tag_neg_bignum: u64 = cbor_tag_neg_bignum
+const tag_neg_bignum: u64 = TAG_NEG_BIGNUM
 // `[exponent, mantissa]`, the value being mantissa times ten to the exponent.
-const tag_decimal_fraction: u64 = cbor_tag_decimal_fraction
+const tag_decimal_fraction: u64 = TAG_DECIMAL_FRACTION
 // The same with a base of two.
-const tag_bigfloat: u64 = cbor_tag_bigfloat
-const tag_cose_encrypt0: u64 = cbor_tag_cose_encrypt0
-const tag_cose_mac0: u64 = cbor_tag_cose_mac0
-const tag_cose_sign1: u64 = cbor_tag_cose_sign1
+const tag_bigfloat: u64 = TAG_BIGFLOAT
+const tag_cose_encrypt0: u64 = TAG_COSE_ENCRYPT0
+const tag_cose_mac0: u64 = TAG_COSE_MAC0
+const tag_cose_sign1: u64 = TAG_COSE_SIGN1
 // "Render this item as base64url if it is converted to JSON", and its two neighbours.
-const tag_enc_as_b64url: u64 = cbor_tag_enc_as_b64url
-const tag_enc_as_b64: u64 = cbor_tag_enc_as_b64
-const tag_enc_as_b16: u64 = cbor_tag_enc_as_b16
+const tag_enc_as_b64url: u64 = TAG_ENC_AS_B64URL
+const tag_enc_as_b64: u64 = TAG_ENC_AS_B64
+const tag_enc_as_b16: u64 = TAG_ENC_AS_B16
 // A byte string whose content is itself CBOR.
-const tag_cbor: u64 = cbor_tag_cbor
-const tag_uri: u64 = cbor_tag_uri
-const tag_b64url: u64 = cbor_tag_b64url
-const tag_b64: u64 = cbor_tag_b64
-const tag_regex: u64 = cbor_tag_regex
-const tag_mime: u64 = cbor_tag_mime
-const tag_bin_uuid: u64 = cbor_tag_bin_uuid
-const tag_cwt: u64 = cbor_tag_cwt
-const tag_cbor_sequence: u64 = cbor_tag_cbor_sequence
-const tag_cose_encrypt: u64 = cbor_tag_cose_encrypt
-const tag_cose_mac: u64 = cbor_tag_cose_mac
-const tag_cose_sign: u64 = cbor_tag_cose_sign
+const tag_cbor: u64 = TAG_CBOR
+const tag_uri: u64 = TAG_URI
+const tag_b64url: u64 = TAG_B64URL
+const tag_b64: u64 = TAG_B64
+const tag_regex: u64 = TAG_REGEX
+const tag_mime: u64 = TAG_MIME
+const tag_bin_uuid: u64 = TAG_BIN_UUID
+const tag_cwt: u64 = TAG_CWT
+const tag_cbor_sequence: u64 = TAG_CBOR_SEQUENCE
+const tag_cose_encrypt: u64 = TAG_COSE_ENCRYPT
+const tag_cose_mac: u64 = TAG_COSE_MAC
+const tag_cose_sign: u64 = TAG_COSE_SIGN
 // Days since 1970-01-01, and the RFC 3339 full-date text form.
-const tag_days_epoch: u64 = cbor_tag_days_epoch
-const tag_days_string: u64 = cbor_tag_days_string
-const tag_geo_coord: u64 = cbor_tag_geo_coord
-const tag_binary_mime: u64 = cbor_tag_binary_mime
+const tag_days_epoch: u64 = TAG_DAYS_EPOCH
+const tag_days_string: u64 = TAG_DAYS_STRING
+const tag_geo_coord: u64 = TAG_GEO_COORD
+const tag_binary_mime: u64 = TAG_BINARY_MIME
 // The self-describing prefix, `d9 d9f7`, which marks a file as CBOR.
-const tag_cbor_magic: u64 = cbor_tag_cbor_magic
+const tag_cbor_magic: u64 = TAG_CBOR_MAGIC
 // The number no tag may have, which is how QCBOR says "no tag here".
-const tag_invalid: u64 = cbor_tag_invalid64
+const tag_invalid: u64 = TAG_INVALID64
 
 // The sizes and limits a caller needs. Supplying an encoder's or a decoder's storage is ordinary use
 // of this package rather than a descent into its C, so the numbers are named here too.
@@ -228,24 +338,24 @@ const tag_invalid: u64 = cbor_tag_invalid64
 // How many 64-bit words `encoder_with_storage` needs. **`[encode_words]u64` is a legal array type**,
 // so a program with no heap at all can hold an encoder's storage in its own frame -- which is the
 // whole reason this is asked of the C compiler instead of reported by a call.
-const encode_words: usize = encode_context_words
+const encode_words: usize = ENCODE_CONTEXT_WORDS
 
 // How many `decoder_with_storage` needs, which is larger: it sizes the context and the item slot.
-const decoder_words: usize = decode_context_words
+const decoder_words: usize = DECODE_CONTEXT_WORDS
 
 // The most bytes `encode_head` can write, for sizing the buffer it is given.
-const head_max: usize = head_buffer_size
+const head_max: usize = HEAD_BUFFER_SIZE
 
 // The most tags QCBOR records for one item. Tags beyond this are `TooManyTags`.
-const max_tags_per_item: u32 = qcbor_max_tags_per_item
+const max_tags_per_item: u32 = MAX_TAGS_PER_ITEM
 
 // QCBOR's own overhead in a string pool, which a pool passed to `set_mem_pool` must exceed.
-const mem_pool_overhead: usize = decode_min_mem_pool_size
+const mem_pool_overhead: usize = DECODE_MIN_MEM_POOL_SIZE
 
 // The member count QCBOR reports for an array or a map whose length is indefinite. Private because
 // it is a sentinel rather than a size: `Item.count` answers `None` for it, which is what a caller
 // should be reading.
-private[qcbor] const count_indefinite: u16 = count_indicates_indefinite_length
+private[qcbor] const count_indefinite: u16 = COUNT_INDICATES_INDEFINITE_LENGTH
 // ==================================================================================================
 // Shared helpers
 // ==================================================================================================
