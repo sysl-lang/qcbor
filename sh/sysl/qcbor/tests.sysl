@@ -102,6 +102,18 @@ an_encoder_can_be_given_its_own_storage() =
             e.add_int(1)
             assert(done(e, out[0..<32]) == "01", "1")
 
+// The same size reached the other way: **module-qualified**, straight off `sh.sysl.qcbor.c` rather
+// than through this module's re-export.
+//
+// That was refused until sysl 0.0.48 -- card 0104, and the reason every constant here is named
+// twice. The two-layer naming stays because it is what `15 §7` asks for, so nothing else in the
+// package writes the qualified form and nothing else would notice it being refused again.
+@test
+a_qualified_c_const_is_a_constant_expression() =
+    var storage: [c.ENCODE_CONTEXT_WORDS]u64 = [0; c.ENCODE_CONTEXT_WORDS]
+
+    assert_eq(storage.len, encode_words, "the same array either way it is spelled")
+
 // The same for the decoder, whose storage holds QCBOR's context and the item slot together. Its size
 // is `sizeof` a structure declared in `shim.h`, and that header exists for no other reason: a `c
 // const` is compiled outside the shim, so it has to be able to name what it measures.
@@ -1723,10 +1735,15 @@ tag_requirements_carry_qcbors_numbers()
     assert_eq(TagRequirement.OptionalAllowingExtra.code(), 0x82, "either, further tags allowed")
 end tag_requirements_carry_qcbors_numbers
 
-// **This is the test that would have caught card 0105**, which the reshape walked into: a `u8`
-// answered by a six-arm match reached the C as a different value, so every `Required` read was
-// refused. `a_tag_requirement_is_enforced` above is what went red; this says the same thing about
-// the number rather than about the outcome, so a re-break names the cause.
+// **This is the test that caught card 0105**, which the reshape walked into: a `u8` answered by a
+// six-arm match reached the C as a different value, so every `Required` read was refused. It was
+// worked around by widening `code()` and the shim's parameter to `int`; **sysl 0.0.48 fixed the
+// compiler** -- a narrow scalar is extended to fill a register, as the convention requires -- and
+// both went back to the `u8` QCBOR itself declares. So this is again a live check on the widening
+// rather than a test of a boundary that had been moved out of its way.
+//
+// `a_tag_requirement_is_enforced` above is what went red; this says the same thing about the number
+// rather than about the outcome, so a re-break names the cause.
 @test("the requirement a getter is given is the one QCBOR acts on")
 a_tag_requirement_reaches_the_library()
     var tagged = decoder(unhex("c11a514b67b0"), Normal)

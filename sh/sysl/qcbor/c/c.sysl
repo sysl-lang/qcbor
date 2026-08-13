@@ -209,11 +209,15 @@ c const
 
 // Whether a tagged getter insists on the tag number. The first three are the requirement and the
 // fourth is a bit OR'd on top of one of them, which is what `TagRequirement`'s six variants are.
+//
+// `u8`, which is what QCBOR's own parameter is. The four were `int` for as long as a narrow scalar
+// could not be trusted across the boundary; sysl 0.0.48 widens one to fill a register, as the
+// convention requires, so the shim takes the byte QCBOR takes and there is no cast in between.
 c const
-    TAG_REQUIREMENT_TAG: int = "QCBOR_TAG_REQUIREMENT_TAG"
-    TAG_REQUIREMENT_NOT_A_TAG: int = "QCBOR_TAG_REQUIREMENT_NOT_A_TAG"
-    TAG_REQUIREMENT_OPTIONAL_TAG: int = "QCBOR_TAG_REQUIREMENT_OPTIONAL_TAG"
-    TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS: int = "QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS"
+    TAG_REQUIREMENT_TAG: u8 = "QCBOR_TAG_REQUIREMENT_TAG"
+    TAG_REQUIREMENT_NOT_A_TAG: u8 = "QCBOR_TAG_REQUIREMENT_NOT_A_TAG"
+    TAG_REQUIREMENT_OPTIONAL_TAG: u8 = "QCBOR_TAG_REQUIREMENT_OPTIONAL_TAG"
+    TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS: u8 = "QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS"
 
 // How a map's labels are read, which is fixed when the decoder is made.
 c const
@@ -449,40 +453,40 @@ extern "sysl_qcbor_get_double_convert_all" get_double_convert_all(d: *DecodeCtx,
                                                                     ln: long, lp: *u8, ll: usize, types: u32,
                                                                     out: *real) -> int
 extern "sysl_qcbor_get_epoch_date" get_epoch_date(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                    req: int, out: *long) -> int
+                                                    req: u8, out: *long) -> int
 extern "sysl_qcbor_get_epoch_days" get_epoch_days(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                    req: int, out: *long) -> int
+                                                    req: u8, out: *long) -> int
 extern "sysl_qcbor_get_date_string" get_date_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: int, p: **u8, n: *usize) -> int
+                                                      req: u8, p: **u8, n: *usize) -> int
 extern "sysl_qcbor_get_days_string" get_days_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: int, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_uri" get_uri(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
+                                                      req: u8, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_uri" get_uri(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                       p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_b64" get_b64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
+extern "sysl_qcbor_get_b64" get_b64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                       p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_b64url" get_b64url(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
+extern "sysl_qcbor_get_b64url" get_b64url(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                             p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_regex" get_regex(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
+extern "sysl_qcbor_get_regex" get_regex(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                           p: **u8, n: *usize) -> int
 extern "sysl_qcbor_get_binary_uuid" get_binary_uuid(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: int, p: **u8, n: *usize) -> int
+                                                      req: u8, p: **u8, n: *usize) -> int
 extern "sysl_qcbor_get_tagged_str" get_tagged_str(d: *DecodeCtx, which: int, lk: int, ln: long,
-                                                    lp: *u8, ll: usize, req: int, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_bignum" get_bignum(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
+                                                    lp: *u8, ll: usize, req: u8, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_bignum" get_bignum(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                             p: **u8, n: *usize, negative: *int) -> int
-extern "sysl_qcbor_get_mime" get_mime(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int,
+extern "sysl_qcbor_get_mime" get_mime(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
                                         p: **u8, n: *usize, binary: *int) -> int
 extern "sysl_qcbor_get_decimal_fraction" get_decimal_fraction(d: *DecodeCtx, lk: int, ln: long,
-                                                                lp: *u8, ll: usize, req: int, mantissa: *long,
+                                                                lp: *u8, ll: usize, req: u8, mantissa: *long,
                                                                 exponent: *long) -> int
 extern "sysl_qcbor_get_big_float" get_big_float(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                  req: int, mantissa: *long,
+                                                  req: u8, mantissa: *long,
                                                   exponent: *long) -> int
 extern "sysl_qcbor_get_decimal_fraction_big" get_decimal_fraction_big(
-    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int, scratch: *u8, scratch_len: usize,
+    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
     p: **u8, n: *usize, negative: *int, exponent: *long) -> int
 extern "sysl_qcbor_get_big_float_big" get_big_float_big(
-    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: int, scratch: *u8, scratch_len: usize,
+    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
     p: **u8, n: *usize, negative: *int, exponent: *long) -> int
 extern "sysl_qcbor_enter_map" enter_map(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
 extern "sysl_qcbor_enter_array" enter_array(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
@@ -493,7 +497,7 @@ extern "sysl_qcbor_get_map_bytes" get_map_bytes(d: *DecodeCtx, lk: int, ln: long
 extern "sysl_qcbor_get_array_bytes" get_array_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
                                                       p: **u8, n: *usize) -> int
 extern "sysl_qcbor_enter_bstr_wrapped" enter_bstr_wrapped(d: *DecodeCtx, lk: int, ln: long,
-                                                            lp: *u8, ll: usize, req: int, p: **u8,
+                                                            lp: *u8, ll: usize, req: u8, p: **u8,
                                                             n: *usize) -> int
 extern "sysl_qcbor_exit_bstr_wrapped" exit_bstr_wrapped(d: *DecodeCtx) -> int
 extern "sysl_qcbor_get_item_in_map" get_item_in_map(d: *DecodeCtx, lk: int, ln: long,

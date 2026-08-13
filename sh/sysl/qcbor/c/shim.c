@@ -896,13 +896,13 @@ static int label_of(const uint8_t *p, size_t n, char *out) {
  */
 #define SPIFFY_GET_TAGGED_STR(NAME, QNAME)                                          \
     int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,      \
-             int req, const uint8_t **p, size_t *n) {                           \
+             uint8_t req, const uint8_t **p, size_t *n) {                           \
         UsefulBufC s = NULLUsefulBufC;                                              \
         LABEL_PROLOGUE                                                              \
         switch (lk) {                                                               \
-            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, (uint8_t)req, &s);  break; \
-            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, (uint8_t)req, &s); break; \
-            default:         QCBORDecode_##QNAME(&d->ctx, (uint8_t)req, &s);              break; \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, req, &s);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, req, &s); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, req, &s);              break; \
         }                                                                           \
         *p = (const uint8_t *)s.ptr;                                                \
         *n = s.len;                                                                 \
@@ -912,12 +912,12 @@ static int label_of(const uint8_t *p, size_t n, char *out) {
 /* A tagged getter with a scalar result -- the two epoch forms. */
 #define SPIFFY_GET_TAGGED(NAME, QNAME, TYPE)                                        \
     int NAME(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,      \
-             int req, TYPE *out) {                                              \
+             uint8_t req, TYPE *out) {                                              \
         LABEL_PROLOGUE                                                              \
         switch (lk) {                                                               \
-            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, (uint8_t)req, out);  break; \
-            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, (uint8_t)req, out); break; \
-            default:         QCBORDecode_##QNAME(&d->ctx, (uint8_t)req, out);              break; \
+            case LABEL_INT:  QCBORDecode_##QNAME##InMapN(&d->ctx, ln, req, out);  break; \
+            case LABEL_TEXT: QCBORDecode_##QNAME##InMapSZ(&d->ctx, sz, req, out); break; \
+            default:         QCBORDecode_##QNAME(&d->ctx, req, out);              break; \
         }                                                                           \
         return (int)QCBORDecode_GetError(&d->ctx);                                  \
     }
@@ -1015,26 +1015,6 @@ uint32_t sysl_qcbor_convert_big_num(void)          { return QCBOR_CONVERT_TYPE_B
 uint32_t sysl_qcbor_convert_decimal_fraction(void) { return QCBOR_CONVERT_TYPE_DECIMAL_FRACTION; }
 uint32_t sysl_qcbor_convert_bigfloat(void)         { return QCBOR_CONVERT_TYPE_BIGFLOAT; }
 
-/* The tag requirement a spiffy getter takes, from the sysl enum's ordinal.
- *
- * QCBOR's three requirements are a small integer and "additional tags are
- * allowed" is a bit OR'd on top, so the six combinations are six values here
- * rather than a second parameter carried through eighty declarations.
- */
-uint8_t sysl_qcbor_tag_requirement(int ordinal) {
-    switch (ordinal) {
-        case 0: return QCBOR_TAG_REQUIREMENT_TAG;
-        case 1: return QCBOR_TAG_REQUIREMENT_NOT_A_TAG;
-        case 2: return QCBOR_TAG_REQUIREMENT_OPTIONAL_TAG;
-        case 3: return (uint8_t)(QCBOR_TAG_REQUIREMENT_TAG |
-                                 QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS);
-        case 4: return (uint8_t)(QCBOR_TAG_REQUIREMENT_NOT_A_TAG |
-                                 QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS);
-        default: return (uint8_t)(QCBOR_TAG_REQUIREMENT_OPTIONAL_TAG |
-                                  QCBOR_TAG_REQUIREMENT_ALLOW_ADDITIONAL_TAGS);
-    }
-}
-
 /* -- The tagged getters ---------------------------------------------------- */
 
 SPIFFY_GET_TAGGED(sysl_qcbor_get_epoch_date, GetEpochDate, int64_t)
@@ -1055,7 +1035,7 @@ SPIFFY_GET_TAGGED_STR(sysl_qcbor_get_binary_uuid, GetBinaryUUID)
  * choice is made here where a switch is the natural thing to write.
  */
 int sysl_qcbor_get_tagged_str(SyslDecoder *d, int which, int lk, int64_t ln,
-                              const uint8_t *lp, size_t ll, int req,
+                              const uint8_t *lp, size_t ll, uint8_t req,
                               const uint8_t **p, size_t *n) {
     switch (which) {
         case 0:  return sysl_qcbor_get_date_string(d, lk, ln, lp, ll, req, p, n);
@@ -1070,16 +1050,16 @@ int sysl_qcbor_get_tagged_str(SyslDecoder *d, int which, int lk, int64_t ln,
 
 /* A bignum, whose sign is which tag it carried rather than part of its bytes. */
 int sysl_qcbor_get_bignum(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
-                          int req, const uint8_t **p, size_t *n, int *negative) {
+                          uint8_t req, const uint8_t **p, size_t *n, int *negative) {
     UsefulBufC s   = NULLUsefulBufC;
     bool       neg = false;
 
     LABEL_PROLOGUE
 
     switch (lk) {
-        case LABEL_INT:  QCBORDecode_GetBignumInMapN(&d->ctx, ln, (uint8_t)req, &s, &neg);  break;
-        case LABEL_TEXT: QCBORDecode_GetBignumInMapSZ(&d->ctx, sz, (uint8_t)req, &s, &neg); break;
-        default:         QCBORDecode_GetBignum(&d->ctx, (uint8_t)req, &s, &neg);            break;
+        case LABEL_INT:  QCBORDecode_GetBignumInMapN(&d->ctx, ln, req, &s, &neg);  break;
+        case LABEL_TEXT: QCBORDecode_GetBignumInMapSZ(&d->ctx, sz, req, &s, &neg); break;
+        default:         QCBORDecode_GetBignum(&d->ctx, req, &s, &neg);            break;
     }
 
     *p        = (const uint8_t *)s.ptr;
@@ -1094,7 +1074,7 @@ int sysl_qcbor_get_bignum(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp,
  * which it got.
  */
 int sysl_qcbor_get_mime(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, size_t ll,
-                        int req, const uint8_t **p, size_t *n, int *is_binary) {
+                        uint8_t req, const uint8_t **p, size_t *n, int *is_binary) {
     UsefulBufC s      = NULLUsefulBufC;
     bool       binary = false;
 
@@ -1102,13 +1082,13 @@ int sysl_qcbor_get_mime(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, s
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetMIMEMessageInMapN(&d->ctx, ln, (uint8_t)req, &s, &binary);
+            QCBORDecode_GetMIMEMessageInMapN(&d->ctx, ln, req, &s, &binary);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetMIMEMessageInMapSZ(&d->ctx, sz, (uint8_t)req, &s, &binary);
+            QCBORDecode_GetMIMEMessageInMapSZ(&d->ctx, sz, req, &s, &binary);
             break;
         default:
-            QCBORDecode_GetMIMEMessage(&d->ctx, (uint8_t)req, &s, &binary);
+            QCBORDecode_GetMIMEMessage(&d->ctx, req, &s, &binary);
             break;
     }
 
@@ -1126,19 +1106,19 @@ int sysl_qcbor_get_mime(SyslDecoder *d, int lk, int64_t ln, const uint8_t *lp, s
  */
 
 int sysl_qcbor_get_decimal_fraction(SyslDecoder *d, int lk, int64_t ln,
-                                    const uint8_t *lp, size_t ll, int req,
+                                    const uint8_t *lp, size_t ll, uint8_t req,
                                     int64_t *mantissa, int64_t *exponent) {
     LABEL_PROLOGUE
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetDecimalFractionInMapN(&d->ctx, ln, (uint8_t)req, mantissa, exponent);
+            QCBORDecode_GetDecimalFractionInMapN(&d->ctx, ln, req, mantissa, exponent);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetDecimalFractionInMapSZ(&d->ctx, sz, (uint8_t)req, mantissa, exponent);
+            QCBORDecode_GetDecimalFractionInMapSZ(&d->ctx, sz, req, mantissa, exponent);
             break;
         default:
-            QCBORDecode_GetDecimalFraction(&d->ctx, (uint8_t)req, mantissa, exponent);
+            QCBORDecode_GetDecimalFraction(&d->ctx, req, mantissa, exponent);
             break;
     }
 
@@ -1146,19 +1126,19 @@ int sysl_qcbor_get_decimal_fraction(SyslDecoder *d, int lk, int64_t ln,
 }
 
 int sysl_qcbor_get_big_float(SyslDecoder *d, int lk, int64_t ln,
-                             const uint8_t *lp, size_t ll, int req,
+                             const uint8_t *lp, size_t ll, uint8_t req,
                              int64_t *mantissa, int64_t *exponent) {
     LABEL_PROLOGUE
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetBigFloatInMapN(&d->ctx, ln, (uint8_t)req, mantissa, exponent);
+            QCBORDecode_GetBigFloatInMapN(&d->ctx, ln, req, mantissa, exponent);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetBigFloatInMapSZ(&d->ctx, sz, (uint8_t)req, mantissa, exponent);
+            QCBORDecode_GetBigFloatInMapSZ(&d->ctx, sz, req, mantissa, exponent);
             break;
         default:
-            QCBORDecode_GetBigFloat(&d->ctx, (uint8_t)req, mantissa, exponent);
+            QCBORDecode_GetBigFloat(&d->ctx, req, mantissa, exponent);
             break;
     }
 
@@ -1174,7 +1154,7 @@ int sysl_qcbor_get_big_float(SyslDecoder *d, int lk, int64_t ln,
  * which is why the sysl side hands back a slice rather than an offset.
  */
 int sysl_qcbor_get_decimal_fraction_big(SyslDecoder *d, int lk, int64_t ln,
-                                        const uint8_t *lp, size_t ll, int req,
+                                        const uint8_t *lp, size_t ll, uint8_t req,
                                         uint8_t *scratch, size_t scratch_len,
                                         const uint8_t **p, size_t *n, int *negative,
                                         int64_t *exponent) {
@@ -1189,13 +1169,13 @@ int sysl_qcbor_get_decimal_fraction_big(SyslDecoder *d, int lk, int64_t ln,
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetDecimalFractionBigInMapN(&d->ctx, ln, (uint8_t)req, buf, &s, &neg, exponent);
+            QCBORDecode_GetDecimalFractionBigInMapN(&d->ctx, ln, req, buf, &s, &neg, exponent);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetDecimalFractionBigInMapSZ(&d->ctx, sz, (uint8_t)req, buf, &s, &neg, exponent);
+            QCBORDecode_GetDecimalFractionBigInMapSZ(&d->ctx, sz, req, buf, &s, &neg, exponent);
             break;
         default:
-            QCBORDecode_GetDecimalFractionBig(&d->ctx, (uint8_t)req, buf, &s, &neg, exponent);
+            QCBORDecode_GetDecimalFractionBig(&d->ctx, req, buf, &s, &neg, exponent);
             break;
     }
 
@@ -1207,7 +1187,7 @@ int sysl_qcbor_get_decimal_fraction_big(SyslDecoder *d, int lk, int64_t ln,
 }
 
 int sysl_qcbor_get_big_float_big(SyslDecoder *d, int lk, int64_t ln,
-                                 const uint8_t *lp, size_t ll, int req,
+                                 const uint8_t *lp, size_t ll, uint8_t req,
                                  uint8_t *scratch, size_t scratch_len,
                                  const uint8_t **p, size_t *n, int *negative,
                                  int64_t *exponent) {
@@ -1222,13 +1202,13 @@ int sysl_qcbor_get_big_float_big(SyslDecoder *d, int lk, int64_t ln,
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_GetBigFloatBigInMapN(&d->ctx, ln, (uint8_t)req, buf, &s, &neg, exponent);
+            QCBORDecode_GetBigFloatBigInMapN(&d->ctx, ln, req, buf, &s, &neg, exponent);
             break;
         case LABEL_TEXT:
-            QCBORDecode_GetBigFloatBigInMapSZ(&d->ctx, sz, (uint8_t)req, buf, &s, &neg, exponent);
+            QCBORDecode_GetBigFloatBigInMapSZ(&d->ctx, sz, req, buf, &s, &neg, exponent);
             break;
         default:
-            QCBORDecode_GetBigFloatBig(&d->ctx, (uint8_t)req, buf, &s, &neg, exponent);
+            QCBORDecode_GetBigFloatBig(&d->ctx, req, buf, &s, &neg, exponent);
             break;
     }
 
@@ -1326,7 +1306,7 @@ int sysl_qcbor_get_array_bytes(SyslDecoder *d, int lk, int64_t ln, const uint8_t
  * the decoding half of the encoder's `bstr_wrap`, and how COSE reads a payload.
  */
 int sysl_qcbor_enter_bstr_wrapped(SyslDecoder *d, int lk, int64_t ln,
-                                  const uint8_t *lp, size_t ll, int req,
+                                  const uint8_t *lp, size_t ll, uint8_t req,
                                   const uint8_t **p, size_t *n) {
     UsefulBufC s = NULLUsefulBufC;
 
@@ -1334,13 +1314,13 @@ int sysl_qcbor_enter_bstr_wrapped(SyslDecoder *d, int lk, int64_t ln,
 
     switch (lk) {
         case LABEL_INT:
-            QCBORDecode_EnterBstrWrappedFromMapN(&d->ctx, ln, (uint8_t)req, &s);
+            QCBORDecode_EnterBstrWrappedFromMapN(&d->ctx, ln, req, &s);
             break;
         case LABEL_TEXT:
-            QCBORDecode_EnterBstrWrappedFromMapSZ(&d->ctx, sz, (uint8_t)req, &s);
+            QCBORDecode_EnterBstrWrappedFromMapSZ(&d->ctx, sz, req, &s);
             break;
         default:
-            QCBORDecode_EnterBstrWrapped(&d->ctx, (uint8_t)req, &s);
+            QCBORDecode_EnterBstrWrapped(&d->ctx, req, &s);
             break;
     }
 

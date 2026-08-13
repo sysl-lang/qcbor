@@ -1,8 +1,10 @@
 module sh.sysl.qcbor
 
 import sh.sysl.qcbor.c
-// Unqualified, because a module-qualified `c const` is not accepted in a `const` initializer --
-// card 0104, and the reason every constant below is named twice.
+// Unqualified, which is the two-layer split applied to values: `c` names each constant under the
+// header's spelling and this module re-exports it under a pleasant one. That started as a
+// workaround -- a module-qualified `c const` was refused in a `const` initializer, card 0104,
+// fixed in sysl 0.0.48 -- and it is kept because naming a thing twice is what the split is for.
 import sh.sysl.qcbor.c.{CONVERT_TYPE_XINT64, CONVERT_TYPE_FLOAT, CONVERT_TYPE_BIG_NUM,
                         CONVERT_TYPE_DECIMAL_FRACTION, CONVERT_TYPE_BIGFLOAT, SUCCESS,
                         ERR_CALLBACK_FAIL, ITEM_LIST_CAPACITY}
@@ -64,12 +66,13 @@ enum TagRequirement
     // is a bit OR'd on top, which is why six named variants beat a second parameter threaded
     // through eighty declarations.
     //
-    // **`int` rather than the `uint8_t` QCBOR's own parameter is, and the shim was widened to
-    // match.** A `u8` answered by a six-arm match reaches a C function as a *different value* --
-    // card 0105, where the reduction is this function almost exactly. Nothing in sysl notices: the
-    // value prints as 0 on the line before the call that acts on something else. Widening the shim
-    // costs one cast at each point of use and is the only thing between here and a wrong decode.
-    code(self) -> int
+    // **`u8`, which is what QCBOR's own parameter is.** It was an `int`, and the shim's parameter
+    // was widened to match, for as long as a `u8` answered by a six-arm match reached a C function
+    // as a *different value* -- card 0105, whose reduction is this function almost exactly. Nothing
+    // in sysl noticed: the value printed correctly on the line before the call that acted on
+    // something else. sysl 0.0.48 widens a narrow scalar to fill a register, as every convention
+    // but AArch64-away-from-Darwin and Windows requires, so the byte crosses as the byte it is.
+    code(self) -> u8
         self match
             Required -> c.TAG_REQUIREMENT_TAG
             Absent -> c.TAG_REQUIREMENT_NOT_A_TAG

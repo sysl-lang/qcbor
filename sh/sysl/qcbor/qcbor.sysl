@@ -283,11 +283,12 @@ impl Display for ErrorKind
 // values rather than to functions: `TAG_CWT` is what the header calls it and `tag_cwt` is what
 // a program should write.
 //
-// It also sidesteps card 0104. A **module-qualified** `c const` is not recognised as a constant --
-// `encode_words` is refused both in a `const` initializer and as an array length, though the same
-// value imported unqualified is accepted in both, and the qualified form still sizes an array
-// literal and stands in a match arm. Importing the names is what makes the re-exports below legal,
-// and `[encode_words]u64` legal for a caller.
+// It began as a way round card 0104, which was a real defect: a **module-qualified** `c const` was
+// not recognised as a constant, so `c.ENCODE_CONTEXT_WORDS` was refused both in a `const`
+// initializer and as an array length, though the same value imported unqualified was accepted in
+// both. **Fixed in sysl 0.0.48** -- the qualified form now stands in either place. The two-layer
+// naming stays: it is what `15 §7` asks for, and it is why `[encode_words]u64` is what a caller
+// writes rather than the header's spelling.
 // ==================================================================================================
 
 // An RFC 3339 date, as text.

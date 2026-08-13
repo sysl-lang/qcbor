@@ -64,12 +64,12 @@ Name it in your project's `package.hocon` and `sysl build` fetches it:
 
 ```hocon
 dependencies {
-  qcbor { git = "github.com/sysl-lang/qcbor", version = "0.3.0" }
+  qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.0" }
 }
 ```
 
 The coordinate is an identity rather than a URL, so it carries no `https://`, and `version` is the
-tag `v0.3.0` here. Resolution clones it, selects versions by MVS, and records what arrived in
+tag `v0.4.0` here. Resolution clones it, selects versions by MVS, and records what arrived in
 `sysl.sum`.
 
 Or build it into an artifact and compile against that, which needs no fetching and is what this
@@ -153,6 +153,14 @@ item kinds are read back off real CBOR in the tests and the six tag-requirement 
 
 All four also print as words — `f"${item.kind()}"` says `decimal fraction with a negative bignum
 mantissa` rather than `14`.
+
+`TagRequirement.code()` answers a `u8`, which is the type QCBOR's own parameter has. It was an `int`
+for one release: a `u8` answered by a six-arm match reached the C as a different value, so the shim
+was widened to take an `int` and cast. That was a compiler defect — a narrow scalar crossing to C was
+not extended to fill a register, as every convention but AArch64-away-from-Darwin and Windows
+requires — and sysl 0.0.48 fixed it, so 0.4.0 takes the widening out again. **The binding needs
+sysl 0.0.48 or newer**; on an older one the tag-requirement tests fail, which is the defect showing
+itself rather than a regression here.
 
 ## Decoding, two ways
 
