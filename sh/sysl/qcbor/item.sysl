@@ -1,11 +1,10 @@
 module sh.sysl.qcbor
-@include("shim.h")
 
+import sh.sysl.qcbor.c
 import sysl.slices.as_ptr
 import sysl.text.{from_utf8, Utf8Error}
 
-// The values a decode produces: `Item` and the shapes read out of one, and the limits QCBOR imposes
-// on a decoder.
+// The values a decode produces: `Item` and the shapes read out of one.
 //
 // One of four files declaring `module sh.sysl.qcbor`; `qcbor.sysl` says what the others hold.
 
@@ -63,14 +62,14 @@ end TagRequirement
 // decoders never batch. A program that does not use this pays nothing for it.
 struct ItemList
     storage: []u64
-    handle: *ItemListCtx
+    handle: *c.ItemListCtx
     of: Decoder
 
     // Ask for a text label, and what type is expected of its value. `Unset` accepts any type, which
     // is what a caller who will inspect the kind themselves wants.
     want(self, label: string, expected: ItemKind) -> Result[unit, string]
         val b = label.bytes
-        val code = c_items_want(self.handle, as_ptr(b), b.len, int(expected))
+        val code = c.items_want(self.handle, as_ptr(b), b.len, int(expected))
 
         if code == 0 then Ok(())
         elif code == 1 then Err("this list already holds as many labels as it can")
@@ -79,7 +78,7 @@ struct ItemList
 
     // The same with an integer label.
     want_at(self, label: long, expected: ItemKind) -> Result[unit, string]
-        val code = c_items_want_at(self.handle, label, int(expected))
+        val code = c.items_want_at(self.handle, label, int(expected))
 
         if code == 0 then Ok(()) else Err("this list already holds as many labels as it can")
     end want_at
@@ -89,123 +88,18 @@ struct ItemList
     // **The item is read through the decoder's one slot**, so it is replaced by the next `at` or by
     // any further decoding -- read the value out before moving on.
     at(self, index: usize) -> Option[Item] =
-        if c_items_select(self.of.handle, self.handle, index) != 0 then Some(Item(self.of)) else None
+        if c.items_select(self.of.handle, self.handle, index) != 0 then Some(Item(self.of)) else None
 end ItemList
 
-opaque struct ItemListCtx
 
-extern "sysl_qcbor_items_words" c_items_words() -> usize
-extern "sysl_qcbor_items_capacity" c_items_capacity() -> usize
-extern "sysl_qcbor_items_init" c_items_init(storage: *u64, words: usize) -> *ItemListCtx
-extern "sysl_qcbor_items_want" c_items_want(l: *ItemListCtx, label: *u8, n: usize,
-                                            kind: int) -> int
-extern "sysl_qcbor_items_want_at" c_items_want_at(l: *ItemListCtx, label: long, kind: int) -> int
-extern "sysl_qcbor_items_run" c_items_run(d: *DecodeCtx, l: *ItemListCtx) -> int
-extern "sysl_qcbor_items_run_with_callback" c_items_run_cb(d: *DecodeCtx, l: *ItemListCtx,
-                                                           ctx: *u8,
-                                                           cb: *extern(*u8, *u8) -> int) -> int
-extern "sysl_qcbor_items_select" c_items_select(d: *DecodeCtx, l: *ItemListCtx,
-                                                index: usize) -> int
-extern "sysl_qcbor_item_stage" c_item_stage(d: *DecodeCtx, item: *u8)
-extern "sysl_qcbor_callback_ok" c_callback_ok() -> int
-extern "sysl_qcbor_callback_fail" c_callback_fail() -> int
 
-extern "sysl_qcbor_get_int64" c_get_int64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                          out: *long) -> int
-extern "sysl_qcbor_get_uint64" c_get_uint64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                            out: *ulong) -> int
-extern "sysl_qcbor_get_double" c_get_double(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                            out: *real) -> int
-extern "sysl_qcbor_get_simple" c_get_simple(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                            out: *u8) -> int
-extern "sysl_qcbor_get_bool" c_get_bool(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                        out: *int) -> int
-extern "sysl_qcbor_get_null" c_get_null(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
-extern "sysl_qcbor_get_undefined" c_get_undefined(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
-extern "sysl_qcbor_get_bytes" c_get_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                          p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_text" c_get_text(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                        p: **u8, n: *usize) -> int
 
-extern "sysl_qcbor_get_int64_convert" c_get_int64_convert(d: *DecodeCtx, lk: int, ln: long,
-                                                          lp: *u8, ll: usize, types: u32, out: *long) -> int
-extern "sysl_qcbor_get_int64_convert_all" c_get_int64_convert_all(d: *DecodeCtx, lk: int, ln: long,
-                                                                  lp: *u8, ll: usize, types: u32,
-                                                                  out: *long) -> int
-extern "sysl_qcbor_get_uint64_convert" c_get_uint64_convert(d: *DecodeCtx, lk: int, ln: long,
-                                                            lp: *u8, ll: usize, types: u32,
-                                                            out: *ulong) -> int
-extern "sysl_qcbor_get_uint64_convert_all" c_get_uint64_convert_all(d: *DecodeCtx, lk: int,
-                                                                    ln: long, lp: *u8, ll: usize, types: u32,
-                                                                    out: *ulong) -> int
-extern "sysl_qcbor_get_double_convert" c_get_double_convert(d: *DecodeCtx, lk: int, ln: long,
-                                                            lp: *u8, ll: usize, types: u32,
-                                                            out: *real) -> int
-extern "sysl_qcbor_get_double_convert_all" c_get_double_convert_all(d: *DecodeCtx, lk: int,
-                                                                    ln: long, lp: *u8, ll: usize, types: u32,
-                                                                    out: *real) -> int
 
-extern "sysl_qcbor_convert_xint64" c_convert_xint64() -> u32
-extern "sysl_qcbor_convert_float" c_convert_float() -> u32
-extern "sysl_qcbor_convert_big_num" c_convert_big_num() -> u32
-extern "sysl_qcbor_convert_decimal_fraction" c_convert_decimal_fraction() -> u32
-extern "sysl_qcbor_convert_bigfloat" c_convert_bigfloat() -> u32
-extern "sysl_qcbor_tag_requirement" c_tag_requirement(ordinal: int) -> u8
 
-extern "sysl_qcbor_get_epoch_date" c_get_epoch_date(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                    req: u8, out: *long) -> int
-extern "sysl_qcbor_get_epoch_days" c_get_epoch_days(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                    req: u8, out: *long) -> int
-extern "sysl_qcbor_get_date_string" c_get_date_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: u8, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_days_string" c_get_days_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: u8, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_uri" c_get_uri(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
-                                      p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_b64" c_get_b64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
-                                      p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_b64url" c_get_b64url(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
-                                            p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_regex" c_get_regex(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
-                                          p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_binary_uuid" c_get_binary_uuid(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      req: u8, p: **u8, n: *usize) -> int
 // The seven above behind one entry point, chosen by `which`, so the sysl side has one dispatcher
 // rather than seven bodies that differ in a name.
-extern "sysl_qcbor_get_tagged_str" c_get_tagged_str(d: *DecodeCtx, which: int, lk: int, ln: long,
-                                                    lp: *u8, ll: usize, req: u8, p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_bignum" c_get_bignum(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
-                                            p: **u8, n: *usize, negative: *int) -> int
-extern "sysl_qcbor_get_mime" c_get_mime(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
-                                        p: **u8, n: *usize, binary: *int) -> int
 
-extern "sysl_qcbor_get_decimal_fraction" c_get_decimal_fraction(d: *DecodeCtx, lk: int, ln: long,
-                                                                lp: *u8, ll: usize, req: u8, mantissa: *long,
-                                                                exponent: *long) -> int
-extern "sysl_qcbor_get_big_float" c_get_big_float(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                  req: u8, mantissa: *long,
-                                                  exponent: *long) -> int
-extern "sysl_qcbor_get_decimal_fraction_big" c_get_decimal_fraction_big(
-    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
-    p: **u8, n: *usize, negative: *int, exponent: *long) -> int
-extern "sysl_qcbor_get_big_float_big" c_get_big_float_big(
-    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
-    p: **u8, n: *usize, negative: *int, exponent: *long) -> int
 
-extern "sysl_qcbor_enter_map" c_enter_map(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
-extern "sysl_qcbor_enter_array" c_enter_array(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
-extern "sysl_qcbor_exit_map" c_exit_map(d: *DecodeCtx) -> int
-extern "sysl_qcbor_exit_array" c_exit_array(d: *DecodeCtx) -> int
-extern "sysl_qcbor_get_map_bytes" c_get_map_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                  p: **u8, n: *usize) -> int
-extern "sysl_qcbor_get_array_bytes" c_get_array_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
-                                                      p: **u8, n: *usize) -> int
-extern "sysl_qcbor_enter_bstr_wrapped" c_enter_bstr_wrapped(d: *DecodeCtx, lk: int, ln: long,
-                                                            lp: *u8, ll: usize, req: u8, p: **u8,
-                                                            n: *usize) -> int
-extern "sysl_qcbor_exit_bstr_wrapped" c_exit_bstr_wrapped(d: *DecodeCtx) -> int
-extern "sysl_qcbor_get_item_in_map" c_get_item_in_map(d: *DecodeCtx, lk: int, ln: long,
-                                                      lp: *u8, ll: usize) -> int
 
 // The label discriminators the shim switches on. Named rather than written as 0, 1 and 2 at ninety
 // call sites, which is where one of them would eventually be wrong.
@@ -235,25 +129,25 @@ private[qcbor] str_result(err: int, p: *u8, n: usize) -> Result[[]const u8, Erro
 
 // The conversion bits the `_convert` getters take, OR'd together to say which CBOR types one call
 // will accept.
-convert_int() -> u32 = c_convert_xint64()
-convert_float() -> u32 = c_convert_float()
-convert_bignum() -> u32 = c_convert_big_num()
-convert_decimal_fraction() -> u32 = c_convert_decimal_fraction()
-convert_big_float() -> u32 = c_convert_bigfloat()
+convert_int() -> u32 = c.convert_xint64()
+convert_float() -> u32 = c.convert_float()
+convert_bignum() -> u32 = c.convert_big_num()
+convert_decimal_fraction() -> u32 = c.convert_decimal_fraction()
+convert_big_float() -> u32 = c.convert_bigfloat()
 
 // What a callback passed to `get_items_checking` returns to accept an item, and to refuse one.
-callback_ok() -> int = c_callback_ok()
-callback_fail() -> int = c_callback_fail()
+callback_ok() -> int = c.callback_ok()
+callback_fail() -> int = c.callback_fail()
 
 // How many labels one `ItemList` can hold.
-items_capacity() -> usize = c_items_capacity()
+items_capacity() -> usize = c.items_capacity()
 
 // A list of labels to fetch from `of`'s entered map in one pass.
 item_list(of: Decoder) -> ItemList
-    var storage: []u64 = [0; c_items_words()]
+    var storage: []u64 = [0; c.items_words()]
 
     // Cannot fail: the storage was just sized by asking C what it needs.
-    ItemList(storage, c_items_init(&storage[0], storage.len), of)
+    ItemList(storage, c.items_init(&storage[0], storage.len), of)
 end item_list
 
 // One decoded item.
@@ -266,31 +160,31 @@ struct Item
     of: Decoder
 
     // What this item is, which decides which accessor below answers.
-    kind(self) -> ItemKind = item_kind(c_item_kind(self.of.handle))
+    kind(self) -> ItemKind = item_kind(c.item_kind(self.of.handle))
 
     // How deep this item sits. `nesting` is its own level and `next_nesting` is the level of the item
     // after it -- **a drop between them is how a definite- and an indefinite-length array both say
     // they have ended**, which is why a reader watches these rather than counting members.
-    nesting(self) -> u8 = c_item_nesting(self.of.handle)
-    next_nesting(self) -> u8 = c_item_next_nesting(self.of.handle)
+    nesting(self) -> u8 = c.item_nesting(self.of.handle)
+    next_nesting(self) -> u8 = c.item_next_nesting(self.of.handle)
 
     // -- Values ------------------------------------------------------------------------------------
 
     // The value of an `Int`, or of anything else that lands in the signed slot -- `DateEpoch` uses
     // `epoch_seconds` instead. `None` when the item is not one.
     int_value(self) -> Option[long] =
-        if self.kind() == Int then Some(c_item_int64(self.of.handle)) else None
+        if self.kind() == Int then Some(c.item_int64(self.of.handle)) else None
 
     // The value of a `Uint`. CBOR's unsigned range runs past what a `long` holds, which is why this
     // is separate rather than widened into `int_value`.
     uint_value(self) -> Option[ulong] =
-        if self.kind() == Uint then Some(c_item_uint64(self.of.handle)) else None
+        if self.kind() == Uint then Some(c.item_uint64(self.of.handle)) else None
 
     // A floating value. Half and single precision arrive here too, widened, because that is what
     // QCBOR does unless it is built without preferred float support.
     double_value(self) -> Option[real] =
-        if self.kind() == Double then Some(c_item_double(self.of.handle))
-        elif self.kind() == Float then Some(real(c_item_float(self.of.handle)))
+        if self.kind() == Double then Some(c.item_double(self.of.handle))
+        elif self.kind() == Float then Some(real(c.item_float(self.of.handle)))
         else None
 
     // `True` and `False` are separate CBOR simple values and separate kinds; this is the pair read as
@@ -302,7 +196,7 @@ struct Item
 
     // The number of an `UnknownSimple` -- a simple value CBOR has not given a meaning.
     simple_value(self) -> Option[u8] =
-        if self.kind() == UnknownSimple then Some(c_item_simple(self.of.handle)) else None
+        if self.kind() == UnknownSimple then Some(c.item_simple(self.of.handle)) else None
 
     // The bytes of a byte string, a text string, a bignum, or any of the tagged string types.
     //
@@ -310,8 +204,8 @@ struct Item
     // decoder was given, which is the ordinary reading of a slice and is the whole reason decoding
     // needs no allocator.
     bytes(self) -> Option[[]const u8]
-        val p = c_item_string_ptr(self.of.handle)
-        val n = c_item_string_len(self.of.handle)
+        val p = c.item_string_ptr(self.of.handle)
+        val n = c.item_string_len(self.of.handle)
 
         if p == null then None else Some(p[0..<n])
     end bytes
@@ -335,7 +229,7 @@ struct Item
         if k != Array && k != Map && k != MapAsArray then
             None
         else
-            val n = c_item_count(self.of.handle)
+            val n = c.item_count(self.of.handle)
 
             if n == count_indefinite then None else Some(usize(n))
     end count
@@ -343,25 +237,25 @@ struct Item
     // Seconds since 1970-01-01 for a `DateEpoch`, and the fractional part separately. A CBOR epoch
     // date may be a float, and QCBOR splits it so that the whole seconds stay exact.
     epoch_seconds(self) -> Option[long] =
-        if self.kind() == DateEpoch then Some(c_item_epoch_seconds(self.of.handle)) else None
+        if self.kind() == DateEpoch then Some(c.item_epoch_seconds(self.of.handle)) else None
 
     epoch_fraction(self) -> Option[real] =
-        if self.kind() == DateEpoch then Some(c_item_epoch_fraction(self.of.handle)) else None
+        if self.kind() == DateEpoch then Some(c.item_epoch_fraction(self.of.handle)) else None
 
     // Days since 1970-01-01 for a `DaysEpoch`.
     epoch_days(self) -> Option[long] =
-        if self.kind() == DaysEpoch then Some(c_item_epoch_days(self.of.handle)) else None
+        if self.kind() == DaysEpoch then Some(c.item_epoch_days(self.of.handle)) else None
 
     // The exponent of a decimal fraction or a big float, in base ten and base two respectively.
     exponent(self) -> Option[long] =
-        if self.is_exp_mantissa() then Some(c_item_exponent(self.of.handle)) else None
+        if self.is_exp_mantissa() then Some(c.item_exponent(self.of.handle)) else None
 
     // The mantissa, when it fits a `long` -- which is what the plain `DecimalFraction` and `BigFloat`
     // kinds mean. The four `...Bignum` kinds put it in `mantissa_bytes` instead, and that is the
     // whole difference between them.
     mantissa(self) -> Option[long] =
         if self.kind() == DecimalFraction || self.kind() == BigFloat then
-            Some(c_item_mantissa(self.of.handle))
+            Some(c.item_mantissa(self.of.handle))
         else
             None
 
@@ -374,8 +268,8 @@ struct Item
            k != BigFloatPosBignum && k != BigFloatNegBignum then
             None
         else
-            val p = c_item_mantissa_ptr(self.of.handle)
-            val n = c_item_mantissa_len(self.of.handle)
+            val p = c.item_mantissa_ptr(self.of.handle)
+            val n = c.item_mantissa_len(self.of.handle)
 
             if p == null then None else Some(p[0..<n])
     end mantissa_bytes
@@ -391,25 +285,25 @@ struct Item
 
     // What kind of label this entry carries, or `None` at a level that is not a map.
     label_kind(self) -> Option[ItemKind]
-        val k = item_kind(c_item_label_kind(self.of.handle))
+        val k = item_kind(c.item_label_kind(self.of.handle))
 
         if k == Unset then None else Some(k)
     end label_kind
 
     label_int(self) -> Option[long] =
         self.label_kind() match
-            Some(Int) -> Some(c_item_label_int64(self.of.handle))
+            Some(Int) -> Some(c.item_label_int64(self.of.handle))
             _ -> None
 
     label_uint(self) -> Option[ulong] =
         self.label_kind() match
-            Some(Uint) -> Some(c_item_label_uint64(self.of.handle))
+            Some(Uint) -> Some(c.item_label_uint64(self.of.handle))
             _ -> None
 
     // A text or byte-string label's bytes, a view into the input as `bytes` is.
     label_bytes(self) -> Option[[]const u8]
-        val p = c_item_label_string_ptr(self.of.handle)
-        val n = c_item_label_string_len(self.of.handle)
+        val p = c.item_label_string_ptr(self.of.handle)
+        val n = c.item_label_string_len(self.of.handle)
 
         self.label_kind() match
             Some(TextString) -> if p == null then None else Some(p[0..<n])
@@ -434,7 +328,7 @@ struct Item
     // **Read through here rather than off the item's own array**: QCBOR maps tag numbers wider than
     // sixteen bits into a small table, so the stored value is not always the tag.
     tag(self, index: u32) -> Option[u64]
-        val t = c_item_tag(self.of.handle, index)
+        val t = c.item_tag(self.of.handle, index)
 
         if t == tag_invalid then None else Some(t)
     end tag
@@ -475,24 +369,10 @@ struct Item
     end tagged_with
 end Item
 
-c const
-    // How many 64-bit words a decoder's storage needs. Larger than an encoder's, because it sizes
-    // the context and the item slot together -- which is why `SyslDecoder` is declared in `shim.h`
-    // rather than inside `shim.c`: a constant is compiled outside the shim and has to be able to
-    // name what it measures.
-    decoder_words: usize = "(sizeof(SyslDecoder) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
-
-    // The most tags QCBOR records for one item. Tags beyond this are `TooManyTags`.
-    max_tags_per_item: u32 = "QCBOR_MAX_TAGS_PER_ITEM"
-
-    // QCBOR's own overhead in a string pool, which a pool must exceed to be accepted.
-    mem_pool_overhead: usize = "QCBOR_DECODE_MIN_MEM_POOL_SIZE"
 
 // The member count QCBOR reports for an array or a map whose length is indefinite. Private because
 // it is a sentinel rather than a size: `Item.count` answers `None` for it, which is what a caller
 // should be reading.
-private c const
-    count_indefinite: u16 = "QCBOR_COUNT_INDICATES_INDEFINITE_LENGTH"
 
 // Start decoding `input`.
 //
@@ -510,7 +390,7 @@ end decoder
 decoder_with_storage(storage: []u64, input: []const u8, mode: DecodeMode) -> Result[Decoder, string]
     require storage.len > 0, "a decoder needs storage; size it with decoder_words"
 
-    val ctx = c_decoder_init(&storage[0], storage.len, as_ptr(input), input.len, mode_number(mode))
+    val ctx = c.decoder_init(&storage[0], storage.len, as_ptr(input), input.len, mode_number(mode))
 
     if ctx == null then
         Err("the storage for a decoder is too small; size it with decoder_words")

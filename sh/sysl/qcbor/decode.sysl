@@ -1,5 +1,6 @@
 module sh.sysl.qcbor
 
+import sh.sysl.qcbor.c
 import sysl.slices.{as_ptr, as_mut_ptr}
 
 // Decoding: `Decoder`, its traversal and its bounded getters.
@@ -7,67 +8,11 @@ import sysl.slices.{as_ptr, as_mut_ptr}
 // One of four files declaring `module sh.sysl.qcbor`; `qcbor.sysl` says what the others hold. The
 // values a decode produces are in `item.sysl`, which is where the split falls -- `Decoder` and
 // `Item` are each too large to share a file, and a struct's methods live in its declaration.
-//
-// This is the only file of the four with no `@include`, because it asks the C compiler for nothing:
-// every constant it uses is declared beside the type that needs it.
 
-// The decoder's state: QCBOR's context and the slot the last decoded item sits in. Bodyless because
-// nothing in sysl lays one out, and it is one type rather than two because an item has to live
-// somewhere and one place is better than two (`shim.c`).
-opaque struct DecodeCtx
 
-extern "sysl_qcbor_decoder_init" c_decoder_init(storage: *u64, words: usize, p: *u8, n: usize,
-                                                mode: int) -> *DecodeCtx
 
-extern "sysl_qcbor_decode_next" c_decode_next(d: *DecodeCtx) -> int
-extern "sysl_qcbor_decode_v_next" c_decode_v_next(d: *DecodeCtx) -> int
-extern "sysl_qcbor_decode_peek" c_decode_peek(d: *DecodeCtx) -> int
-extern "sysl_qcbor_decode_v_peek" c_decode_v_peek(d: *DecodeCtx) -> int
-extern "sysl_qcbor_decode_next_consume" c_decode_next_consume(d: *DecodeCtx) -> int
 
-extern "sysl_qcbor_item_kind" c_item_kind(d: *DecodeCtx) -> int
-extern "sysl_qcbor_item_label_kind" c_item_label_kind(d: *DecodeCtx) -> int
-extern "sysl_qcbor_item_nesting" c_item_nesting(d: *DecodeCtx) -> u8
-extern "sysl_qcbor_item_next_nesting" c_item_next_nesting(d: *DecodeCtx) -> u8
-extern "sysl_qcbor_item_int64" c_item_int64(d: *DecodeCtx) -> long
-extern "sysl_qcbor_item_uint64" c_item_uint64(d: *DecodeCtx) -> ulong
-extern "sysl_qcbor_item_double" c_item_double(d: *DecodeCtx) -> real
-extern "sysl_qcbor_item_float" c_item_float(d: *DecodeCtx) -> f32
-extern "sysl_qcbor_item_simple" c_item_simple(d: *DecodeCtx) -> u8
-extern "sysl_qcbor_item_count" c_item_count(d: *DecodeCtx) -> u16
-extern "sysl_qcbor_item_string_ptr" c_item_string_ptr(d: *DecodeCtx) -> *u8
-extern "sysl_qcbor_item_string_len" c_item_string_len(d: *DecodeCtx) -> usize
-extern "sysl_qcbor_item_epoch_seconds" c_item_epoch_seconds(d: *DecodeCtx) -> long
-extern "sysl_qcbor_item_epoch_fraction" c_item_epoch_fraction(d: *DecodeCtx) -> real
-extern "sysl_qcbor_item_epoch_days" c_item_epoch_days(d: *DecodeCtx) -> long
-extern "sysl_qcbor_item_exponent" c_item_exponent(d: *DecodeCtx) -> long
-extern "sysl_qcbor_item_mantissa" c_item_mantissa(d: *DecodeCtx) -> long
-extern "sysl_qcbor_item_mantissa_ptr" c_item_mantissa_ptr(d: *DecodeCtx) -> *u8
-extern "sysl_qcbor_item_mantissa_len" c_item_mantissa_len(d: *DecodeCtx) -> usize
-extern "sysl_qcbor_item_label_int64" c_item_label_int64(d: *DecodeCtx) -> long
-extern "sysl_qcbor_item_label_uint64" c_item_label_uint64(d: *DecodeCtx) -> ulong
-extern "sysl_qcbor_item_label_string_ptr" c_item_label_string_ptr(d: *DecodeCtx) -> *u8
-extern "sysl_qcbor_item_label_string_len" c_item_label_string_len(d: *DecodeCtx) -> usize
 
-extern "sysl_qcbor_item_tag" c_item_tag(d: *DecodeCtx, index: u32) -> u64
-extern "sysl_qcbor_last_tag" c_last_tag(d: *DecodeCtx, index: u32) -> u64
-
-extern "sysl_qcbor_decode_finish" c_decode_finish(d: *DecodeCtx) -> int
-extern "sysl_qcbor_decode_partial_finish" c_decode_partial_finish(d: *DecodeCtx,
-                                                                  consumed: *usize) -> int
-extern "sysl_qcbor_decode_tell" c_decode_tell(d: *DecodeCtx) -> usize
-extern "sysl_qcbor_decode_at_end" c_decode_at_end(d: *DecodeCtx) -> int
-extern "sysl_qcbor_decode_rewind" c_decode_rewind(d: *DecodeCtx)
-extern "sysl_qcbor_decode_get_error" c_decode_get_error(d: *DecodeCtx) -> int
-extern "sysl_qcbor_decode_get_and_reset_error" c_decode_reset_error(d: *DecodeCtx) -> int
-extern "sysl_qcbor_decode_set_error" c_decode_set_error(d: *DecodeCtx, err: int)
-extern "sysl_qcbor_decode_undecoded" c_decode_undecoded(d: *DecodeCtx, offset: *usize, len: *usize)
-extern "sysl_qcbor_decode_set_mem_pool" c_decode_set_mem_pool(d: *DecodeCtx, pool: *u8,
-                                                              pool_len: usize,
-                                                              all_strings: int) -> int
-extern "sysl_qcbor_decode_set_allocator" c_decode_set_allocator(
-    d: *DecodeCtx, allocate: *extern(*u8, *u8, usize, **u8, *usize) -> int, ctx: *u8,
-    all_strings: int)
 
 // What a decoded item is. The names are CBOR's and QCBOR's, and the order is `shim.c`'s `KIND_` list
 // -- the same arrangement `ErrorKind` uses and for the same reason.
@@ -155,7 +100,7 @@ struct Decoder
     // Held so that a `bytes` slice cannot outlive the buffer it views, and so that the offsets the
     // shim reports can be turned back into slices.
     input: []const u8
-    handle: *DecodeCtx
+    handle: *c.DecodeCtx
 
     // -- Traversal ---------------------------------------------------------------------------------
 
@@ -164,7 +109,7 @@ struct Decoder
     //
     // `NoMoreItems` is the end of the input, and it is the ordinary way a loop stops.
     next(self) -> Result[Item, Error]
-        val err = c_decode_next(self.handle)
+        val err = c.decode_next(self.handle)
 
         if err == 0 then Ok(Item(self)) else Err(Error(err))
     end next
@@ -173,47 +118,47 @@ struct Decoder
     // calls can be written without a check between each, and `error` asked once at the end. That is
     // what the bounded-mode reads below are built on.
     v_next(self) -> Item
-        c_decode_v_next(self.handle)
+        c.decode_v_next(self.handle)
         Item(self)
     end v_next
 
     // The next item without consuming it, so the following `next` returns the same one. This is how
     // a reader decides what to do by looking at what is there.
     peek(self) -> Result[Item, Error]
-        val err = c_decode_peek(self.handle)
+        val err = c.decode_peek(self.handle)
 
         if err == 0 then Ok(Item(self)) else Err(Error(err))
     end peek
 
     v_peek(self) -> Item
-        c_decode_v_peek(self.handle)
+        c.decode_v_peek(self.handle)
         Item(self)
     end v_peek
 
     // The next item **and everything inside it**, which is how a subtree whose content does not
     // matter is skipped in one call rather than by counting members.
     next_consume(self) -> Item
-        c_decode_next_consume(self.handle)
+        c.decode_next_consume(self.handle)
         Item(self)
     end next_consume
 
     // -- Position and finishing --------------------------------------------------------------------
 
     // Whether the traversal has reached the end of the input, without consuming anything to find out.
-    at_end(self) -> bool = c_decode_at_end(self.handle) != 0
+    at_end(self) -> bool = c.decode_at_end(self.handle) != 0
 
     // Where in the input the traversal is, as a byte offset.
-    tell(self) -> usize = c_decode_tell(self.handle)
+    tell(self) -> usize = c.decode_tell(self.handle)
 
     // Return to the start of the current bounded level, or of the whole input when none has been
     // entered. What makes a map readable twice.
-    rewind(self) = c_decode_rewind(self.handle)
+    rewind(self) = c.decode_rewind(self.handle)
 
     // Check that the input is exhausted and every level closed. **A decode is not correct until this
     // says so**: bytes left over mean the input was not what it claimed, and `ExtraBytes` is how a
     // protocol notices a message with something appended.
     finish(self) -> Result[unit, Error]
-        val err = c_decode_finish(self.handle)
+        val err = c.decode_finish(self.handle)
 
         if err == 0 then Ok(()) else Err(Error(err))
     end finish
@@ -228,7 +173,7 @@ struct Decoder
     // anything is left.
     partial_finish(self) -> Result[usize, Error]
         var consumed: usize = 0
-        val err = c_decode_partial_finish(self.handle, &consumed)
+        val err = c.decode_partial_finish(self.handle, &consumed)
 
         if err == 0 then Ok(consumed) else Err(Error(err))
     end partial_finish
@@ -239,7 +184,7 @@ struct Decoder
         var offset: usize = 0
         var n: usize = 0
 
-        c_decode_undecoded(self.handle, &offset, &n)
+        c.decode_undecoded(self.handle, &offset, &n)
 
         if n == 0 then [] else self.input[offset..<offset + n]
     end remaining
@@ -249,7 +194,7 @@ struct Decoder
     // The failure remembered from a `v_` call or a bounded read, or `None`. Every one of those is a
     // no-op once an error is set, so a sequence of them is checked once here.
     error(self) -> Option[Error]
-        val err = c_decode_get_error(self.handle)
+        val err = c.decode_get_error(self.handle)
 
         if err == 0 then None else Some(Error(err))
     end error
@@ -257,14 +202,14 @@ struct Decoder
     // The same, clearing it, so that a recoverable failure -- a label that was not found, a type that
     // was not what was hoped -- can be tried differently rather than ending the decode.
     take_error(self) -> Option[Error]
-        val err = c_decode_reset_error(self.handle)
+        val err = c.decode_reset_error(self.handle)
 
         if err == 0 then None else Some(Error(err))
     end take_error
 
     // Stop the decoder with a failure of the caller's own, so that a validation the protocol requires
     // and CBOR does not ends the run the same way a malformed input would.
-    set_error(self, err: Error) = c_decode_set_error(self.handle, err.code)
+    set_error(self, err: Error) = c.decode_set_error(self.handle, err.code)
 
     // -- The pool for indefinite-length strings ----------------------------------------------------
 
@@ -277,7 +222,7 @@ struct Decoder
     //
     // The pool must be longer than `mem_pool_overhead`, which is QCBOR's own bookkeeping.
     set_mem_pool(self, pool: []u8, all_strings: bool) -> Result[unit, Error]
-        val err = c_decode_set_mem_pool(self.handle, as_mut_ptr(pool), pool.len, flag(all_strings))
+        val err = c.decode_set_mem_pool(self.handle, as_mut_ptr(pool), pool.len, flag(all_strings))
 
         if err == 0 then Ok(()) else Err(Error(err))
     end set_mem_pool
@@ -305,7 +250,7 @@ struct Decoder
     // transcribe into sysl. `shim.c` adapts between the two.
     set_allocator(self, allocate: *extern(*u8, *u8, usize, **u8, *usize) -> int, ctx: *u8,
                   all_strings: bool) =
-        c_decode_set_allocator(self.handle, allocate, ctx, flag(all_strings))
+        c.decode_set_allocator(self.handle, allocate, ctx, flag(all_strings))
 
     // ----------------------------------------------------------------------------------------------
     // Spiffy decode
@@ -334,7 +279,7 @@ struct Decoder
     private int_by(self, lk: int, ln: long, lb: []const u8) -> Result[long, Error]
         var v: long = 0
 
-        result(c_get_int64(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
+        result(c.get_int64(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end int_by
 
     get_uint(self) -> Result[ulong, Error] = self.uint_by(lk_none, 0, no_label())
@@ -344,7 +289,7 @@ struct Decoder
     private uint_by(self, lk: int, ln: long, lb: []const u8) -> Result[ulong, Error]
         var v: ulong = 0
 
-        result(c_get_uint64(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
+        result(c.get_uint64(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end uint_by
 
     // -- Floating point ----------------------------------------------------------------------------
@@ -358,7 +303,7 @@ struct Decoder
     private double_by(self, lk: int, ln: long, lb: []const u8) -> Result[real, Error]
         var v: real = 0.0
 
-        result(c_get_double(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
+        result(c.get_double(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end double_by
 
     // -- Simple values -----------------------------------------------------------------------------
@@ -370,7 +315,7 @@ struct Decoder
     private bool_by(self, lk: int, ln: long, lb: []const u8) -> Result[bool, Error]
         var v: int = 0
 
-        result(c_get_bool(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v != 0)
+        result(c.get_bool(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v != 0)
     end bool_by
 
     get_simple(self) -> Result[u8, Error] = self.simple_by(lk_none, 0, no_label())
@@ -380,22 +325,22 @@ struct Decoder
     private simple_by(self, lk: int, ln: long, lb: []const u8) -> Result[u8, Error]
         var v: u8 = 0
 
-        result(c_get_simple(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
+        result(c.get_simple(self.handle, lk, ln, as_ptr(lb), lb.len, &v), v)
     end simple_by
 
     // These two carry no value: what is being asked is "is the next item this, and step over it".
-    get_null(self) -> Result[unit, Error] = unit_result(c_get_null(self.handle, lk_none, 0, null, 0))
+    get_null(self) -> Result[unit, Error] = unit_result(c.get_null(self.handle, lk_none, 0, null, 0))
     get_null_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_get_null(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
+        unit_result(c.get_null(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
     get_null_in_map_at(self, label: long) -> Result[unit, Error] =
-        unit_result(c_get_null(self.handle, lk_int, label, null, 0))
+        unit_result(c.get_null(self.handle, lk_int, label, null, 0))
 
     get_undefined(self) -> Result[unit, Error] =
-        unit_result(c_get_undefined(self.handle, lk_none, 0, null, 0))
+        unit_result(c.get_undefined(self.handle, lk_none, 0, null, 0))
     get_undefined_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_get_undefined(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
+        unit_result(c.get_undefined(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
     get_undefined_in_map_at(self, label: long) -> Result[unit, Error] =
-        unit_result(c_get_undefined(self.handle, lk_int, label, null, 0))
+        unit_result(c.get_undefined(self.handle, lk_int, label, null, 0))
 
     // -- Strings -----------------------------------------------------------------------------------
     //
@@ -411,7 +356,7 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_get_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n), p, n)
+        str_result(c.get_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n), p, n)
     end bytes_by
 
     // The bytes of a text string. Still a view -- `text_of` turns one into a `string`.
@@ -425,7 +370,7 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_get_text(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n), p, n)
+        str_result(c.get_text(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n), p, n)
     end text_by
 
     // -- Converting getters ------------------------------------------------------------------------
@@ -458,9 +403,9 @@ struct Decoder
         var err: int = 0
 
         if all then
-            err = c_get_int64_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
+            err = c.get_int64_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
         else
-            err = c_get_int64_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
+            err = c.get_int64_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
 
         result(err, v)
     end int_conv
@@ -484,9 +429,9 @@ struct Decoder
         var err: int = 0
 
         if all then
-            err = c_get_uint64_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
+            err = c.get_uint64_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
         else
-            err = c_get_uint64_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
+            err = c.get_uint64_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
 
         result(err, v)
     end uint_conv
@@ -510,9 +455,9 @@ struct Decoder
         var err: int = 0
 
         if all then
-            err = c_get_double_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
+            err = c.get_double_convert_all(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
         else
-            err = c_get_double_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
+            err = c.get_double_convert(self.handle, lk, ln, as_ptr(lb), lb.len, types, &v)
 
         result(err, v)
     end double_conv
@@ -540,13 +485,13 @@ struct Decoder
     private epoch(self, lk: int, ln: long, lb: []const u8, tags: TagRequirement,
                   seconds: bool) -> Result[long, Error]
         var v: long = 0
-        val req = c_tag_requirement(int(tags))
+        val req = c.tag_requirement(int(tags))
         var err: int = 0
 
         if seconds then
-            err = c_get_epoch_date(self.handle, lk, ln, as_ptr(lb), lb.len, req, &v)
+            err = c.get_epoch_date(self.handle, lk, ln, as_ptr(lb), lb.len, req, &v)
         else
-            err = c_get_epoch_days(self.handle, lk, ln, as_ptr(lb), lb.len, req, &v)
+            err = c.get_epoch_days(self.handle, lk, ln, as_ptr(lb), lb.len, req, &v)
 
         result(err, v)
     end epoch
@@ -607,9 +552,9 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        val req = c_tag_requirement(int(tags))
+        val req = c.tag_requirement(int(tags))
 
-        str_result(c_get_tagged_str(self.handle, which, lk, ln, as_ptr(lb), lb.len, req, &p, &n), p, n)
+        str_result(c.get_tagged_str(self.handle, which, lk, ln, as_ptr(lb), lb.len, req, &p, &n), p, n)
     end tagged_str
 
     // An arbitrary-precision integer. **The sign is which tag it carried, not part of the bytes**,
@@ -627,7 +572,7 @@ struct Decoder
         var n: usize = 0
         var negative: int = 0
 
-        val err = c_get_bignum(self.handle, lk, ln, as_ptr(lb), lb.len, c_tag_requirement(int(tags)),
+        val err = c.get_bignum(self.handle, lk, ln, as_ptr(lb), lb.len, c.tag_requirement(int(tags)),
                                &p, &n, &negative)
 
         if err != 0 then
@@ -652,7 +597,7 @@ struct Decoder
         var n: usize = 0
         var binary: int = 0
 
-        val err = c_get_mime(self.handle, lk, ln, as_ptr(lb), lb.len, c_tag_requirement(int(tags)), &p, &n, &binary)
+        val err = c.get_mime(self.handle, lk, ln, as_ptr(lb), lb.len, c.tag_requirement(int(tags)), &p, &n, &binary)
 
         if err != 0 then
             Err(Error(err))
@@ -685,13 +630,13 @@ struct Decoder
         var mantissa: long = 0
         var exponent: long = 0
 
-        val req = c_tag_requirement(int(tags))
+        val req = c.tag_requirement(int(tags))
         var err: int = 0
 
         if decimal then
-            err = c_get_decimal_fraction(self.handle, lk, ln, as_ptr(lb), lb.len, req, &mantissa, &exponent)
+            err = c.get_decimal_fraction(self.handle, lk, ln, as_ptr(lb), lb.len, req, &mantissa, &exponent)
         else
-            err = c_get_big_float(self.handle, lk, ln, as_ptr(lb), lb.len, req, &mantissa, &exponent)
+            err = c.get_big_float(self.handle, lk, ln, as_ptr(lb), lb.len, req, &mantissa, &exponent)
 
         if err == 0 then Ok(ExpMantissa(mantissa, exponent)) else Err(Error(err))
     end exp_mantissa
@@ -729,14 +674,14 @@ struct Decoder
         var negative: int = 0
         var exponent: long = 0
 
-        val req = c_tag_requirement(int(tags))
+        val req = c.tag_requirement(int(tags))
         var err: int = 0
 
         if decimal then
-            err = c_get_decimal_fraction_big(self.handle, lk, ln, as_ptr(lb), lb.len, req, as_mut_ptr(scratch),
+            err = c.get_decimal_fraction_big(self.handle, lk, ln, as_ptr(lb), lb.len, req, as_mut_ptr(scratch),
                                        scratch.len, &p, &n, &negative, &exponent)
         else
-            err = c_get_big_float_big(self.handle, lk, ln, as_ptr(lb), lb.len, req, as_mut_ptr(scratch),
+            err = c.get_big_float_big(self.handle, lk, ln, as_ptr(lb), lb.len, req, as_mut_ptr(scratch),
 
                                     scratch.len, &p, &n, &negative, &exponent)
 
@@ -755,21 +700,21 @@ struct Decoder
     // `enter` is matched by an `exit`, which puts the traversal on the item after the whole thing.
 
     enter_map(self) -> Result[unit, Error] =
-        unit_result(c_enter_map(self.handle, lk_none, 0, null, 0))
+        unit_result(c.enter_map(self.handle, lk_none, 0, null, 0))
     enter_map_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_enter_map(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
+        unit_result(c.enter_map(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
     enter_map_in_map_at(self, label: long) -> Result[unit, Error] =
-        unit_result(c_enter_map(self.handle, lk_int, label, null, 0))
+        unit_result(c.enter_map(self.handle, lk_int, label, null, 0))
 
     enter_array(self) -> Result[unit, Error] =
-        unit_result(c_enter_array(self.handle, lk_none, 0, null, 0))
+        unit_result(c.enter_array(self.handle, lk_none, 0, null, 0))
     enter_array_in_map(self, label: string) -> Result[unit, Error] =
-        unit_result(c_enter_array(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
+        unit_result(c.enter_array(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len))
     enter_array_in_map_at(self, label: long) -> Result[unit, Error] =
-        unit_result(c_enter_array(self.handle, lk_int, label, null, 0))
+        unit_result(c.enter_array(self.handle, lk_int, label, null, 0))
 
-    exit_map(self) -> Result[unit, Error] = unit_result(c_exit_map(self.handle))
-    exit_array(self) -> Result[unit, Error] = unit_result(c_exit_array(self.handle))
+    exit_map(self) -> Result[unit, Error] = unit_result(c.exit_map(self.handle))
+    exit_array(self) -> Result[unit, Error] = unit_result(c.exit_array(self.handle))
 
     // A whole map or array as **the bytes that encode it**, without decoding inside -- for forwarding
     // a subtree untouched, or hashing the exact bytes a signature covers.
@@ -792,9 +737,9 @@ struct Decoder
         var err: int = 0
 
         if map then
-            err = c_get_map_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n)
+            err = c.get_map_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n)
         else
-            err = c_get_array_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n)
+            err = c.get_array_bytes(self.handle, lk, ln, as_ptr(lb), lb.len, &p, &n)
 
         str_result(err, p, n)
     end nested_bytes
@@ -815,22 +760,22 @@ struct Decoder
         var p: *u8 = null
         var n: usize = 0
 
-        str_result(c_enter_bstr_wrapped(self.handle, lk, ln, as_ptr(lb), lb.len, c_tag_requirement(int(tags)),
+        str_result(c.enter_bstr_wrapped(self.handle, lk, ln, as_ptr(lb), lb.len, c.tag_requirement(int(tags)),
                                         &p, &n), p, n)
     end bstr_by
 
-    exit_bstr_wrapped(self) -> Result[unit, Error] = unit_result(c_exit_bstr_wrapped(self.handle))
+    exit_bstr_wrapped(self) -> Result[unit, Error] = unit_result(c.exit_bstr_wrapped(self.handle))
 
     // One item by label with no type expected -- the general form the typed getters specialize. The
     // item lands where `Item` reads it, so the answer is an `Item` rather than a value.
     get_item_in_map(self, label: string) -> Result[Item, Error]
-        val err = c_get_item_in_map(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len)
+        val err = c.get_item_in_map(self.handle, lk_text, 0, as_ptr(label.bytes), label.bytes.len)
 
         if err == 0 then Ok(Item(self)) else Err(Error(err))
     end get_item_in_map
 
     get_item_in_map_at(self, label: long) -> Result[Item, Error]
-        val err = c_get_item_in_map(self.handle, lk_int, label, null, 0)
+        val err = c.get_item_in_map(self.handle, lk_int, label, null, 0)
 
         if err == 0 then Ok(Item(self)) else Err(Error(err))
     end get_item_in_map_at
@@ -840,7 +785,7 @@ struct Decoder
     // Find every label the list asks for in a single traversal of the entered map, instead of one
     // traversal per label. `list.at(i)` then reads the nth result.
     get_items(self, list: ItemList) -> Result[unit, Error] =
-        unit_result(c_items_run(self.handle, list.handle))
+        unit_result(c.items_run(self.handle, list.handle))
 
     // The same, with `check` consulted for **the entries the list did not ask for**.
     //
@@ -860,7 +805,7 @@ struct Decoder
     // the traversal with that error.
     get_items_checking(self, list: ItemList,
                        check: *extern(*u8, *u8) -> int) -> Result[unit, Error] =
-        unit_result(c_items_run_cb(self.handle, list.handle, ptr_cast(self.handle), check))
+        unit_result(c.items_run_cb(self.handle, list.handle, ptr_cast(self.handle), check))
 
 end Decoder
 
@@ -876,8 +821,8 @@ end Decoder
 // input directly. `remaining` is the one method that would want the input back, and a callback has
 // no business calling it.
 staged(ctx: *u8, item: *u8) -> Item
-    val handle: *DecodeCtx = ptr_cast(ctx)
+    val handle: *c.DecodeCtx = ptr_cast(ctx)
 
-    c_item_stage(handle, item)
+    c.item_stage(handle, item)
     Item(Decoder([], [], handle))
 end staged

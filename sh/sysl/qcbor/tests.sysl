@@ -1,5 +1,6 @@
 module sh.sysl.qcbor
 
+import sh.sysl.qcbor.c
 import sysl.text.{str_builder_with_capacity, from_utf8}
 
 // The binding's own tests, run by `sysl test .`.

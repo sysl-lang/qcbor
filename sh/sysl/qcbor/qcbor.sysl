@@ -1,7 +1,18 @@
 module sh.sysl.qcbor
-@link("m")
-@include("shim.h")
 
+import sh.sysl.qcbor.c
+import sh.sysl.qcbor.c.{cbor_tag_date_string, cbor_tag_date_epoch, cbor_tag_pos_bignum,
+                       cbor_tag_neg_bignum, cbor_tag_decimal_fraction, cbor_tag_bigfloat,
+                       cbor_tag_cose_encrypt0, cbor_tag_cose_mac0, cbor_tag_cose_sign1,
+                       cbor_tag_enc_as_b64url, cbor_tag_enc_as_b64, cbor_tag_enc_as_b16,
+                       cbor_tag_cbor, cbor_tag_uri, cbor_tag_b64url, cbor_tag_b64, cbor_tag_regex,
+                       cbor_tag_mime, cbor_tag_bin_uuid, cbor_tag_cwt, cbor_tag_cbor_sequence,
+                       cbor_tag_cose_encrypt, cbor_tag_cose_mac, cbor_tag_cose_sign,
+                       cbor_tag_days_epoch, cbor_tag_days_string, cbor_tag_geo_coord,
+                       cbor_tag_binary_mime, cbor_tag_cbor_magic, cbor_tag_invalid64,
+                       encode_context_words, head_buffer_size, decode_context_words,
+                       qcbor_max_tags_per_item, decode_min_mem_pool_size,
+                       count_indicates_indefinite_length}
 import sysl.text.from_cstring
 
 // CBOR (RFC 8949), bound to QCBOR 1.6.1.
@@ -18,27 +29,27 @@ import sysl.text.from_cstring
 // split is invisible from outside. What decided the boundaries is that a struct's methods live in
 // its declaration: `Decoder` and `Item` are large and cannot be divided, so they get a file each.
 //
-// The C sits beside them and is compiled as part of the library (`15 §7`), so **nothing has to be
-// installed to use this package**, and the only `@link` is `m` -- the mathematics, which the
-// decoder's numeric coercions reach for and nothing else does. `package.hocon` says why that is a
-// link directive rather than a capability.
+// **Everything that is C is in `sh.sysl.qcbor.c`** -- the `@link`, the `@include`, the three opaque
+// contexts, the sizes and limits, the tag numbers, and all 155 `extern` declarations. The C itself
+// is in that directory too: `shim.c`, QCBOR's five translation units and their ten headers. So a
+// call reading `c.add_int64(h, 1)` says it is crossing into C, and nothing below reads as though it
+// were sysl when it is not.
+//
+// The C is compiled as part of the library (`15 §7`), so **nothing has to be installed to use this
+// package**, and the only `@link` is `m` -- the mathematics, which the decoder's numeric coercions
+// reach for and nothing else does. `package.hocon` says why that is a link directive rather than a
+// capability.
 //
 // **QCBOR allocates nothing, and this binding keeps that.** A context is storage the caller supplies;
 // an encoder writes into a buffer the caller supplies; a decoded string is a view into the input the
 // caller supplied. Nothing here calls `malloc`, which is what lets CBOR -- a format designed for
-// constrained devices -- be encoded on one.
+// constrained devices -- be encoded on one. It is also why nothing in this package has an `impl
+// Drop`: there is no allocation for one to free, and a caller's slice is freed by the caller.
 //
 // What crosses the boundary is a pointer and a length, in both directions, because QCBOR says "a
-// string" with a `UsefulBufC` and a struct passed by value has no sysl spelling. `shim.c` splits
-// every one of them, and also reaches the two hundred-odd `static inline` functions that have no
-// symbol for an `extern` to name.
-//
-// **What is a value rather than a function is asked of the C compiler in a `c const` block.** The
-// tag numbers, the two context sizes and the limits are `#define`s, so nothing links to them -- and
-// a shim reporting one through a call answers with something that is not a constant: it cannot size
-// an array, stand in a match arm, or be folded into a bound. `@include("shim.h")` is the header
-// those expressions are compiled against, and it carries QCBOR's own with it; a file with no `c
-// const` block in it does not name the header, which is why `decode.sysl` has no `@include`.
+// string" with a `UsefulBufC`. `shim.c` splits every one of them, and -- the reason the shims are
+// not optional -- reaches the two hundred-odd `static inline` functions that have no symbol for an
+// `extern` to name.
 
 // ==================================================================================================
 // Errors
@@ -53,17 +64,17 @@ struct Error
 
     // QCBOR's own description. Never empty: it answers "Unidentified error" for a number it does not
     // know, and the bytes are static storage in C, so the decode cannot fail on a dangling pointer.
-    message(self) -> string = from_cstring_or(c_error_message(self.code), "unidentified error")
+    message(self) -> string = from_cstring_or(c.error_message(self.code), "unidentified error")
 
-    kind(self) -> ErrorKind = error_kind(c_error_ordinal(self.code))
+    kind(self) -> ErrorKind = error_kind(c.error_ordinal(self.code))
 
     // Whether the input is not CBOR at all, as against CBOR this decoder would not accept. The
     // distinction matters to a protocol that must tell a corrupt message from an unsupported one.
-    not_well_formed(self) -> bool = c_error_is_not_well_formed(self.code) != 0
+    not_well_formed(self) -> bool = c.error_is_not_well_formed(self.code) != 0
 
     // Whether decoding can continue past this. A recoverable error leaves the decoder positioned to
     // try the next item; an unrecoverable one means the traversal itself is lost.
-    unrecoverable(self) -> bool = c_error_is_unrecoverable(self.code) != 0
+    unrecoverable(self) -> bool = c.error_is_unrecoverable(self.code) != 0
 end Error
 
 // An `Error` renders as QCBOR's own sentence for it, so `f"${err}"` and printing a failed `Result`
@@ -148,67 +159,93 @@ end ErrorKind
 // binding used to say that itself, in an `impl Eq` performing the same comparison.
 private error_kind(ordinal: int) -> ErrorKind = ErrorKind.try(ordinal).unwrap_or(Other)
 
-extern "sysl_qcbor_error_ordinal" c_error_ordinal(err: int) -> int
-extern "sysl_qcbor_error_message" c_error_message(err: int) -> *u8
-extern "sysl_qcbor_error_is_not_well_formed" c_error_is_not_well_formed(err: int) -> int
-extern "sysl_qcbor_error_is_unrecoverable" c_error_is_unrecoverable(err: int) -> int
 
 // ==================================================================================================
-// The tag numbers RFC 8949 and the CBOR registry assign
+// The tag numbers RFC 8949 and the CBOR registry assign, and the sizes QCBOR imposes
 //
-// These are protocol constants rather than QCBOR's, so they are fixed for all time by IANA, and a
+// The tag numbers are protocol constants rather than QCBOR's, fixed for all time by IANA, so a
 // caller passing one to `add_tag` is naming something in the format rather than in this library.
 // They are still read from the headers, for the reason `15 §7` gives: a `#define` has no symbol, and
 // a number transcribed into sysl is a number that was right on one machine.
 //
-// **They are constants rather than functions**, so `tag_cwt` is a value a `match` arm can be written
-// against and a `const` can be defined from. That is what a `c const` block buys over the thirty
-// shim functions this used to be: the C compiler is asked at build time and the answer is folded in.
+// **The `c const` block that asks for them is in `sh.sysl.qcbor.c`, under C's own spelling**, and
+// every one is named again here under the pleasant one. That is the two-layer split applied to
+// values rather than to functions: `cbor_tag_cwt` is what the header calls it and `tag_cwt` is what
+// a program should write.
+//
+// It also sidesteps card 0104. A **module-qualified** `c const` is not recognised as a constant --
+// `encode_words` is refused both in a `const` initializer and as an array length, though the same
+// value imported unqualified is accepted in both, and the qualified form still sizes an array
+// literal and stands in a match arm. Importing the names is what makes the re-exports below legal,
+// and `[encode_words]u64` legal for a caller.
 // ==================================================================================================
 
-c const
-    // An RFC 3339 date, as text.
-    tag_date_string: u64 = "CBOR_TAG_DATE_STRING"
-    // Seconds since 1970-01-01, as an integer or a float.
-    tag_date_epoch: u64 = "CBOR_TAG_DATE_EPOCH"
-    // An arbitrary-precision integer, big-endian, in a byte string.
-    tag_pos_bignum: u64 = "CBOR_TAG_POS_BIGNUM"
-    // The same, for a negative value: the bytes encode -1 minus the number.
-    tag_neg_bignum: u64 = "CBOR_TAG_NEG_BIGNUM"
-    // `[exponent, mantissa]`, the value being mantissa times ten to the exponent.
-    tag_decimal_fraction: u64 = "CBOR_TAG_DECIMAL_FRACTION"
-    // The same with a base of two.
-    tag_bigfloat: u64 = "CBOR_TAG_BIGFLOAT"
-    tag_cose_encrypt0: u64 = "CBOR_TAG_COSE_ENCRYPT0"
-    tag_cose_mac0: u64 = "CBOR_TAG_COSE_MAC0"
-    tag_cose_sign1: u64 = "CBOR_TAG_COSE_SIGN1"
-    // "Render this item as base64url if it is converted to JSON", and its two neighbours.
-    tag_enc_as_b64url: u64 = "CBOR_TAG_ENC_AS_B64URL"
-    tag_enc_as_b64: u64 = "CBOR_TAG_ENC_AS_B64"
-    tag_enc_as_b16: u64 = "CBOR_TAG_ENC_AS_B16"
-    // A byte string whose content is itself CBOR.
-    tag_cbor: u64 = "CBOR_TAG_CBOR"
-    tag_uri: u64 = "CBOR_TAG_URI"
-    tag_b64url: u64 = "CBOR_TAG_B64URL"
-    tag_b64: u64 = "CBOR_TAG_B64"
-    tag_regex: u64 = "CBOR_TAG_REGEX"
-    tag_mime: u64 = "CBOR_TAG_MIME"
-    tag_bin_uuid: u64 = "CBOR_TAG_BIN_UUID"
-    tag_cwt: u64 = "CBOR_TAG_CWT"
-    tag_cbor_sequence: u64 = "CBOR_TAG_CBOR_SEQUENCE"
-    tag_cose_encrypt: u64 = "CBOR_TAG_COSE_ENCRYPT"
-    tag_cose_mac: u64 = "CBOR_TAG_COSE_MAC"
-    tag_cose_sign: u64 = "CBOR_TAG_COSE_SIGN"
-    // Days since 1970-01-01, and the RFC 3339 full-date text form.
-    tag_days_epoch: u64 = "CBOR_TAG_DAYS_EPOCH"
-    tag_days_string: u64 = "CBOR_TAG_DAYS_STRING"
-    tag_geo_coord: u64 = "CBOR_TAG_GEO_COORD"
-    tag_binary_mime: u64 = "CBOR_TAG_BINARY_MIME"
-    // The self-describing prefix, `d9 d9f7`, which marks a file as CBOR.
-    tag_cbor_magic: u64 = "CBOR_TAG_CBOR_MAGIC"
-    // The number no tag may have, which is how QCBOR says "no tag here".
-    tag_invalid: u64 = "CBOR_TAG_INVALID64"
+// An RFC 3339 date, as text.
+const tag_date_string: u64 = cbor_tag_date_string
+// Seconds since 1970-01-01, as an integer or a float.
+const tag_date_epoch: u64 = cbor_tag_date_epoch
+// An arbitrary-precision integer, big-endian, in a byte string.
+const tag_pos_bignum: u64 = cbor_tag_pos_bignum
+// The same, for a negative value: the bytes encode -1 minus the number.
+const tag_neg_bignum: u64 = cbor_tag_neg_bignum
+// `[exponent, mantissa]`, the value being mantissa times ten to the exponent.
+const tag_decimal_fraction: u64 = cbor_tag_decimal_fraction
+// The same with a base of two.
+const tag_bigfloat: u64 = cbor_tag_bigfloat
+const tag_cose_encrypt0: u64 = cbor_tag_cose_encrypt0
+const tag_cose_mac0: u64 = cbor_tag_cose_mac0
+const tag_cose_sign1: u64 = cbor_tag_cose_sign1
+// "Render this item as base64url if it is converted to JSON", and its two neighbours.
+const tag_enc_as_b64url: u64 = cbor_tag_enc_as_b64url
+const tag_enc_as_b64: u64 = cbor_tag_enc_as_b64
+const tag_enc_as_b16: u64 = cbor_tag_enc_as_b16
+// A byte string whose content is itself CBOR.
+const tag_cbor: u64 = cbor_tag_cbor
+const tag_uri: u64 = cbor_tag_uri
+const tag_b64url: u64 = cbor_tag_b64url
+const tag_b64: u64 = cbor_tag_b64
+const tag_regex: u64 = cbor_tag_regex
+const tag_mime: u64 = cbor_tag_mime
+const tag_bin_uuid: u64 = cbor_tag_bin_uuid
+const tag_cwt: u64 = cbor_tag_cwt
+const tag_cbor_sequence: u64 = cbor_tag_cbor_sequence
+const tag_cose_encrypt: u64 = cbor_tag_cose_encrypt
+const tag_cose_mac: u64 = cbor_tag_cose_mac
+const tag_cose_sign: u64 = cbor_tag_cose_sign
+// Days since 1970-01-01, and the RFC 3339 full-date text form.
+const tag_days_epoch: u64 = cbor_tag_days_epoch
+const tag_days_string: u64 = cbor_tag_days_string
+const tag_geo_coord: u64 = cbor_tag_geo_coord
+const tag_binary_mime: u64 = cbor_tag_binary_mime
+// The self-describing prefix, `d9 d9f7`, which marks a file as CBOR.
+const tag_cbor_magic: u64 = cbor_tag_cbor_magic
+// The number no tag may have, which is how QCBOR says "no tag here".
+const tag_invalid: u64 = cbor_tag_invalid64
 
+// The sizes and limits a caller needs. Supplying an encoder's or a decoder's storage is ordinary use
+// of this package rather than a descent into its C, so the numbers are named here too.
+
+// How many 64-bit words `encoder_with_storage` needs. **`[encode_words]u64` is a legal array type**,
+// so a program with no heap at all can hold an encoder's storage in its own frame -- which is the
+// whole reason this is asked of the C compiler instead of reported by a call.
+const encode_words: usize = encode_context_words
+
+// How many `decoder_with_storage` needs, which is larger: it sizes the context and the item slot.
+const decoder_words: usize = decode_context_words
+
+// The most bytes `encode_head` can write, for sizing the buffer it is given.
+const head_max: usize = head_buffer_size
+
+// The most tags QCBOR records for one item. Tags beyond this are `TooManyTags`.
+const max_tags_per_item: u32 = qcbor_max_tags_per_item
+
+// QCBOR's own overhead in a string pool, which a pool passed to `set_mem_pool` must exceed.
+const mem_pool_overhead: usize = decode_min_mem_pool_size
+
+// The member count QCBOR reports for an array or a map whose length is indefinite. Private because
+// it is a sentinel rather than a size: `Item.count` answers `None` for it, which is what a caller
+// should be reading.
+private[qcbor] const count_indefinite: u16 = count_indicates_indefinite_length
 // ==================================================================================================
 // Shared helpers
 // ==================================================================================================

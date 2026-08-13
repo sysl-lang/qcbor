@@ -1,0 +1,368 @@
+module sh.sysl.qcbor.c
+@link("m")
+@include("shim.h")
+
+// QCBOR itself: every declaration that crosses into C, and nothing else.
+//
+// **The split keeps two jobs apart.** This one has to be *faithful* -- a signature disagreeing with
+// the C header links perfectly and corrupts the call at run time, and nothing in this arrangement
+// checks one against the other, so every declaration below was read out of `shim.c` rather than
+// remembered. The rest of the package has to be *pleasant*, which is a different question and would
+// otherwise be answered in the same breath.
+//
+// **The C lives in this directory too** -- `shim.c`, QCBOR's five translation units and their ten
+// headers sit beside this file, so everything that is C is in one place literally rather than as a
+// figure of speech. That is also what lets `@include("shim.h")` name the header with no path and no
+// flag: a `c const` block below is compiled against the header sitting next to it.
+//
+// A caller may import this module and use it. `c.add_int64(h, 1)` reads as dropping into C on
+// purpose, which is the whole value of the name; nothing here is hidden and nothing needs to be.
+//
+// **Nothing in QCBOR allocates, and nothing here frees.** There is no `destroy` below and no `impl
+// Drop` anywhere in this package, because a context is storage the caller supplied and a decoded
+// string is a view into the caller's input. That is the property CBOR exists for on a constrained
+// device, and it is why the ownership machinery the other bindings in this org needed has nothing
+// to do here.
+
+
+// ==================================================================================================
+// The three contexts
+//
+// Bodyless because nothing in sysl lays one out: each is a `#define`d size the C compiler measures
+// and the caller supplies storage for (`15 §9`). Being three distinct types rather than three
+// spellings of `*u8` is what stops a decoder being handed to something that wants an encoder.
+// ==================================================================================================
+
+opaque struct EncodeCtx
+
+// QCBOR's decoding context and the slot the last decoded item sits in, together -- one type rather
+// than two because an item has to live somewhere and one place is better than two (`shim.h`).
+opaque struct DecodeCtx
+
+opaque struct ItemListCtx
+
+
+// ==================================================================================================
+// Sizes and limits
+//
+// What is a value rather than a function is asked of the C compiler here. A shim reporting one
+// through a call answers with something that is not a constant: it cannot size an array, stand in a
+// `match` arm, or be folded into a bound.
+// ==================================================================================================
+
+c const
+    // How many 64-bit words an encoding context needs. A caller sizes storage with this rather than
+    // with a number somebody wrote down: `15 §7` is explicit that a transcribed `sizeof` compiles
+    // everywhere and is correct on one machine.
+    //
+    // **Being a constant is what makes `[encode_words]u64` a legal array**, so a program with no
+    // heap at all can hold an encoder's storage in its own frame.
+    encode_context_words: usize = "(sizeof(QCBOREncodeContext) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
+
+    // The most bytes `encode_head` can write, for sizing the buffer it is given.
+    head_buffer_size: usize = "QCBOR_HEAD_BUFFER_SIZE"
+
+    // How many 64-bit words a decoder's storage needs. Larger than an encoder's, because it sizes
+    // the context and the item slot together -- which is why `SyslDecoder` is declared in `shim.h`
+    // rather than inside `shim.c`: a constant is compiled outside the shim and has to be able to
+    // name what it measures.
+    decode_context_words: usize = "(sizeof(SyslDecoder) + sizeof(uint64_t) - 1) / sizeof(uint64_t)"
+
+    // The most tags QCBOR records for one item. Tags beyond this are `TooManyTags`.
+    qcbor_max_tags_per_item: u32 = "QCBOR_MAX_TAGS_PER_ITEM"
+
+    // QCBOR's own overhead in a string pool, which a pool must exceed to be accepted.
+    decode_min_mem_pool_size: usize = "QCBOR_DECODE_MIN_MEM_POOL_SIZE"
+
+    // The member count QCBOR reports for an array or a map whose length is indefinite. A sentinel
+    // rather than a size: `Item.count` answers `None` for it, which is what a caller reads.
+    count_indicates_indefinite_length: u16 = "QCBOR_COUNT_INDICATES_INDEFINITE_LENGTH"
+
+
+// ==================================================================================================
+// The tag numbers RFC 8949 and the CBOR registry assign
+//
+// These are protocol constants rather than QCBOR's, fixed for all time by IANA, so a caller passing
+// one to `add_tag` is naming something in the format rather than in this library. They are still
+// read from the headers, for the reason `15 §7` gives: a `#define` has no symbol, and a number
+// transcribed into sysl is a number that was right on one machine.
+//
+// `sh.sysl.qcbor` re-exports every one of them under the same name, so a caller writes
+// `qcbor.tag_cwt` and never has to import this module for a tag.
+// ==================================================================================================
+
+c const
+    cbor_tag_date_string: u64 = "CBOR_TAG_DATE_STRING"
+    cbor_tag_date_epoch: u64 = "CBOR_TAG_DATE_EPOCH"
+    cbor_tag_pos_bignum: u64 = "CBOR_TAG_POS_BIGNUM"
+    cbor_tag_neg_bignum: u64 = "CBOR_TAG_NEG_BIGNUM"
+    cbor_tag_decimal_fraction: u64 = "CBOR_TAG_DECIMAL_FRACTION"
+    cbor_tag_bigfloat: u64 = "CBOR_TAG_BIGFLOAT"
+    cbor_tag_cose_encrypt0: u64 = "CBOR_TAG_COSE_ENCRYPT0"
+    cbor_tag_cose_mac0: u64 = "CBOR_TAG_COSE_MAC0"
+    cbor_tag_cose_sign1: u64 = "CBOR_TAG_COSE_SIGN1"
+    cbor_tag_enc_as_b64url: u64 = "CBOR_TAG_ENC_AS_B64URL"
+    cbor_tag_enc_as_b64: u64 = "CBOR_TAG_ENC_AS_B64"
+    cbor_tag_enc_as_b16: u64 = "CBOR_TAG_ENC_AS_B16"
+    cbor_tag_cbor: u64 = "CBOR_TAG_CBOR"
+    cbor_tag_uri: u64 = "CBOR_TAG_URI"
+    cbor_tag_b64url: u64 = "CBOR_TAG_B64URL"
+    cbor_tag_b64: u64 = "CBOR_TAG_B64"
+    cbor_tag_regex: u64 = "CBOR_TAG_REGEX"
+    cbor_tag_mime: u64 = "CBOR_TAG_MIME"
+    cbor_tag_bin_uuid: u64 = "CBOR_TAG_BIN_UUID"
+    cbor_tag_cwt: u64 = "CBOR_TAG_CWT"
+    cbor_tag_cbor_sequence: u64 = "CBOR_TAG_CBOR_SEQUENCE"
+    cbor_tag_cose_encrypt: u64 = "CBOR_TAG_COSE_ENCRYPT"
+    cbor_tag_cose_mac: u64 = "CBOR_TAG_COSE_MAC"
+    cbor_tag_cose_sign: u64 = "CBOR_TAG_COSE_SIGN"
+    cbor_tag_days_epoch: u64 = "CBOR_TAG_DAYS_EPOCH"
+    cbor_tag_days_string: u64 = "CBOR_TAG_DAYS_STRING"
+    cbor_tag_geo_coord: u64 = "CBOR_TAG_GEO_COORD"
+    cbor_tag_binary_mime: u64 = "CBOR_TAG_BINARY_MIME"
+    cbor_tag_cbor_magic: u64 = "CBOR_TAG_CBOR_MAGIC"
+    cbor_tag_invalid64: u64 = "CBOR_TAG_INVALID64"
+
+
+// ==================================================================================================
+// Errors
+// ==================================================================================================
+
+extern "sysl_qcbor_error_ordinal" error_ordinal(err: int) -> int
+extern "sysl_qcbor_error_message" error_message(err: int) -> *u8
+extern "sysl_qcbor_error_is_not_well_formed" error_is_not_well_formed(err: int) -> int
+extern "sysl_qcbor_error_is_unrecoverable" error_is_unrecoverable(err: int) -> int
+
+// ==================================================================================================
+// Encoding
+// ==================================================================================================
+
+extern "sysl_qcbor_encode_init" encode_init(storage: *u64, words: usize, out: *u8,
+                                              out_len: usize) -> *EncodeCtx
+extern "sysl_qcbor_encode_add_int64" add_int64(ctx: *EncodeCtx, v: long)
+extern "sysl_qcbor_encode_add_uint64" add_uint64(ctx: *EncodeCtx, v: ulong)
+extern "sysl_qcbor_encode_add_double" add_double(ctx: *EncodeCtx, v: real)
+extern "sysl_qcbor_encode_add_float" add_float(ctx: *EncodeCtx, v: f32)
+extern "sysl_qcbor_encode_add_double_no_preferred" add_double_np(ctx: *EncodeCtx, v: real)
+extern "sysl_qcbor_encode_add_float_no_preferred" add_float_np(ctx: *EncodeCtx, v: f32)
+extern "sysl_qcbor_encode_add_text" add_text(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_bytes" add_bytes(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_bytes_len_only" add_bytes_len_only(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_open_bytes" open_bytes(ctx: *EncodeCtx, place: **u8, place_len: *usize)
+extern "sysl_qcbor_encode_close_bytes" close_bytes(ctx: *EncodeCtx, amount: usize)
+extern "sysl_qcbor_encode_add_bool" add_bool(ctx: *EncodeCtx, b: int)
+extern "sysl_qcbor_encode_add_null" add_null(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_undef" add_undef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_simple" add_simple(ctx: *EncodeCtx, v: u8)
+extern "sysl_qcbor_encode_add_tag" add_tag(ctx: *EncodeCtx, tag: u64)
+extern "sysl_qcbor_encode_add_date_epoch" add_date_epoch(ctx: *EncodeCtx, tagged: int, v: long)
+extern "sysl_qcbor_encode_add_days_epoch" add_days_epoch(ctx: *EncodeCtx, tagged: int, v: long)
+extern "sysl_qcbor_encode_add_date_string" add_date_string(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_days_string" add_days_string(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_binary_uuid" add_binary_uuid(ctx: *EncodeCtx, tagged: int,
+                                                             p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_positive_bignum" add_pos_bignum(ctx: *EncodeCtx, tagged: int,
+                                                                p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_negative_bignum" add_neg_bignum(ctx: *EncodeCtx, tagged: int,
+                                                                p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_decimal_fraction" add_decimal_fraction(ctx: *EncodeCtx, tagged: int,
+                                                                       mantissa: long,
+                                                                       exponent: long)
+extern "sysl_qcbor_encode_add_decimal_fraction_bignum" add_decimal_fraction_big(
+    ctx: *EncodeCtx, tagged: int, p: *u8, n: usize, negative: int, exponent: long)
+extern "sysl_qcbor_encode_add_big_float" add_big_float(ctx: *EncodeCtx, tagged: int,
+                                                         mantissa: long, exponent: long)
+extern "sysl_qcbor_encode_add_big_float_bignum" add_big_float_big(
+    ctx: *EncodeCtx, tagged: int, p: *u8, n: usize, negative: int, exponent: long)
+extern "sysl_qcbor_encode_add_uri" add_uri(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_b64_text" add_b64(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_b64url_text" add_b64url(ctx: *EncodeCtx, tagged: int,
+                                                        p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_regex" add_regex(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_add_mime_data" add_mime(ctx: *EncodeCtx, tagged: int, p: *u8, n: usize)
+extern "sysl_qcbor_encode_open_array" open_array(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_array" close_array(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_map" open_map(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_map" close_map(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_array_indefinite" open_array_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_array_indefinite" close_array_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_open_map_indefinite" open_map_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_map_indefinite" close_map_indef(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_bstr_wrap" bstr_wrap(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_close_bstr_wrap" close_bstr_wrap(ctx: *EncodeCtx, include_head: int,
+                                                             offset: *usize, len: *usize)
+extern "sysl_qcbor_encode_cancel_bstr_wrap" cancel_bstr_wrap(ctx: *EncodeCtx)
+extern "sysl_qcbor_encode_add_encoded" add_encoded(ctx: *EncodeCtx, p: *u8, n: usize)
+extern "sysl_qcbor_encode_finish" encode_finish(ctx: *EncodeCtx, len: *usize) -> int
+extern "sysl_qcbor_encode_finish_get_size" encode_finish_size(ctx: *EncodeCtx, len: *usize) -> int
+extern "sysl_qcbor_encode_get_error" encode_get_error(ctx: *EncodeCtx) -> int
+extern "sysl_qcbor_encode_is_buffer_null" encode_is_buffer_null(ctx: *EncodeCtx) -> int
+extern "sysl_qcbor_encode_tell" encode_tell(ctx: *EncodeCtx) -> usize
+extern "sysl_qcbor_encode_substring" encode_substring(ctx: *EncodeCtx, start: usize,
+                                                        offset: *usize, len: *usize)
+extern "sysl_qcbor_encode_head" encode_head(out: *u8, out_len: usize, major: u8, min_len: u8,
+                                              number: u64) -> usize
+
+// ==================================================================================================
+// Decoding: the context, the traversal, and the item slot
+// ==================================================================================================
+
+extern "sysl_qcbor_decoder_init" decoder_init(storage: *u64, words: usize, p: *u8, n: usize,
+                                                mode: int) -> *DecodeCtx
+extern "sysl_qcbor_decode_next" decode_next(d: *DecodeCtx) -> int
+extern "sysl_qcbor_decode_v_next" decode_v_next(d: *DecodeCtx) -> int
+extern "sysl_qcbor_decode_peek" decode_peek(d: *DecodeCtx) -> int
+extern "sysl_qcbor_decode_v_peek" decode_v_peek(d: *DecodeCtx) -> int
+extern "sysl_qcbor_decode_next_consume" decode_next_consume(d: *DecodeCtx) -> int
+extern "sysl_qcbor_item_kind" item_kind(d: *DecodeCtx) -> int
+extern "sysl_qcbor_item_label_kind" item_label_kind(d: *DecodeCtx) -> int
+extern "sysl_qcbor_item_nesting" item_nesting(d: *DecodeCtx) -> u8
+extern "sysl_qcbor_item_next_nesting" item_next_nesting(d: *DecodeCtx) -> u8
+extern "sysl_qcbor_item_int64" item_int64(d: *DecodeCtx) -> long
+extern "sysl_qcbor_item_uint64" item_uint64(d: *DecodeCtx) -> ulong
+extern "sysl_qcbor_item_double" item_double(d: *DecodeCtx) -> real
+extern "sysl_qcbor_item_float" item_float(d: *DecodeCtx) -> f32
+extern "sysl_qcbor_item_simple" item_simple(d: *DecodeCtx) -> u8
+extern "sysl_qcbor_item_count" item_count(d: *DecodeCtx) -> u16
+extern "sysl_qcbor_item_string_ptr" item_string_ptr(d: *DecodeCtx) -> *u8
+extern "sysl_qcbor_item_string_len" item_string_len(d: *DecodeCtx) -> usize
+extern "sysl_qcbor_item_epoch_seconds" item_epoch_seconds(d: *DecodeCtx) -> long
+extern "sysl_qcbor_item_epoch_fraction" item_epoch_fraction(d: *DecodeCtx) -> real
+extern "sysl_qcbor_item_epoch_days" item_epoch_days(d: *DecodeCtx) -> long
+extern "sysl_qcbor_item_exponent" item_exponent(d: *DecodeCtx) -> long
+extern "sysl_qcbor_item_mantissa" item_mantissa(d: *DecodeCtx) -> long
+extern "sysl_qcbor_item_mantissa_ptr" item_mantissa_ptr(d: *DecodeCtx) -> *u8
+extern "sysl_qcbor_item_mantissa_len" item_mantissa_len(d: *DecodeCtx) -> usize
+extern "sysl_qcbor_item_label_int64" item_label_int64(d: *DecodeCtx) -> long
+extern "sysl_qcbor_item_label_uint64" item_label_uint64(d: *DecodeCtx) -> ulong
+extern "sysl_qcbor_item_label_string_ptr" item_label_string_ptr(d: *DecodeCtx) -> *u8
+extern "sysl_qcbor_item_label_string_len" item_label_string_len(d: *DecodeCtx) -> usize
+extern "sysl_qcbor_item_tag" item_tag(d: *DecodeCtx, index: u32) -> u64
+extern "sysl_qcbor_last_tag" last_tag(d: *DecodeCtx, index: u32) -> u64
+extern "sysl_qcbor_decode_finish" decode_finish(d: *DecodeCtx) -> int
+extern "sysl_qcbor_decode_partial_finish" decode_partial_finish(d: *DecodeCtx,
+                                                                  consumed: *usize) -> int
+extern "sysl_qcbor_decode_tell" decode_tell(d: *DecodeCtx) -> usize
+extern "sysl_qcbor_decode_at_end" decode_at_end(d: *DecodeCtx) -> int
+extern "sysl_qcbor_decode_rewind" decode_rewind(d: *DecodeCtx)
+extern "sysl_qcbor_decode_get_error" decode_get_error(d: *DecodeCtx) -> int
+extern "sysl_qcbor_decode_get_and_reset_error" decode_reset_error(d: *DecodeCtx) -> int
+extern "sysl_qcbor_decode_set_error" decode_set_error(d: *DecodeCtx, err: int)
+extern "sysl_qcbor_decode_undecoded" decode_undecoded(d: *DecodeCtx, offset: *usize, len: *usize)
+extern "sysl_qcbor_decode_set_mem_pool" decode_set_mem_pool(d: *DecodeCtx, pool: *u8,
+                                                              pool_len: usize,
+                                                              all_strings: int) -> int
+extern "sysl_qcbor_decode_set_allocator" decode_set_allocator(
+    d: *DecodeCtx, allocate: *extern(*u8, *u8, usize, **u8, *usize) -> int, ctx: *u8,
+    all_strings: int)
+
+// ==================================================================================================
+// The bounded getters, and the batch list
+// ==================================================================================================
+
+extern "sysl_qcbor_items_words" items_words() -> usize
+extern "sysl_qcbor_items_capacity" items_capacity() -> usize
+extern "sysl_qcbor_items_init" items_init(storage: *u64, words: usize) -> *ItemListCtx
+extern "sysl_qcbor_items_want" items_want(l: *ItemListCtx, label: *u8, n: usize,
+                                            kind: int) -> int
+extern "sysl_qcbor_items_want_at" items_want_at(l: *ItemListCtx, label: long, kind: int) -> int
+extern "sysl_qcbor_items_run" items_run(d: *DecodeCtx, l: *ItemListCtx) -> int
+extern "sysl_qcbor_items_run_with_callback" items_run_cb(d: *DecodeCtx, l: *ItemListCtx,
+                                                           ctx: *u8,
+                                                           cb: *extern(*u8, *u8) -> int) -> int
+extern "sysl_qcbor_items_select" items_select(d: *DecodeCtx, l: *ItemListCtx,
+                                                index: usize) -> int
+extern "sysl_qcbor_item_stage" item_stage(d: *DecodeCtx, item: *u8)
+extern "sysl_qcbor_callback_ok" callback_ok() -> int
+extern "sysl_qcbor_callback_fail" callback_fail() -> int
+extern "sysl_qcbor_get_int64" get_int64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                          out: *long) -> int
+extern "sysl_qcbor_get_uint64" get_uint64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                            out: *ulong) -> int
+extern "sysl_qcbor_get_double" get_double(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                            out: *real) -> int
+extern "sysl_qcbor_get_simple" get_simple(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                            out: *u8) -> int
+extern "sysl_qcbor_get_bool" get_bool(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                        out: *int) -> int
+extern "sysl_qcbor_get_null" get_null(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
+extern "sysl_qcbor_get_undefined" get_undefined(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
+extern "sysl_qcbor_get_bytes" get_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                          p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_text" get_text(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                        p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_int64_convert" get_int64_convert(d: *DecodeCtx, lk: int, ln: long,
+                                                          lp: *u8, ll: usize, types: u32, out: *long) -> int
+extern "sysl_qcbor_get_int64_convert_all" get_int64_convert_all(d: *DecodeCtx, lk: int, ln: long,
+                                                                  lp: *u8, ll: usize, types: u32,
+                                                                  out: *long) -> int
+extern "sysl_qcbor_get_uint64_convert" get_uint64_convert(d: *DecodeCtx, lk: int, ln: long,
+                                                            lp: *u8, ll: usize, types: u32,
+                                                            out: *ulong) -> int
+extern "sysl_qcbor_get_uint64_convert_all" get_uint64_convert_all(d: *DecodeCtx, lk: int,
+                                                                    ln: long, lp: *u8, ll: usize, types: u32,
+                                                                    out: *ulong) -> int
+extern "sysl_qcbor_get_double_convert" get_double_convert(d: *DecodeCtx, lk: int, ln: long,
+                                                            lp: *u8, ll: usize, types: u32,
+                                                            out: *real) -> int
+extern "sysl_qcbor_get_double_convert_all" get_double_convert_all(d: *DecodeCtx, lk: int,
+                                                                    ln: long, lp: *u8, ll: usize, types: u32,
+                                                                    out: *real) -> int
+extern "sysl_qcbor_convert_xint64" convert_xint64() -> u32
+extern "sysl_qcbor_convert_float" convert_float() -> u32
+extern "sysl_qcbor_convert_big_num" convert_big_num() -> u32
+extern "sysl_qcbor_convert_decimal_fraction" convert_decimal_fraction() -> u32
+extern "sysl_qcbor_convert_bigfloat" convert_bigfloat() -> u32
+extern "sysl_qcbor_tag_requirement" tag_requirement(ordinal: int) -> u8
+extern "sysl_qcbor_get_epoch_date" get_epoch_date(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                                    req: u8, out: *long) -> int
+extern "sysl_qcbor_get_epoch_days" get_epoch_days(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                                    req: u8, out: *long) -> int
+extern "sysl_qcbor_get_date_string" get_date_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                                      req: u8, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_days_string" get_days_string(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                                      req: u8, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_uri" get_uri(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+                                      p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_b64" get_b64(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+                                      p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_b64url" get_b64url(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+                                            p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_regex" get_regex(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+                                          p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_binary_uuid" get_binary_uuid(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                                      req: u8, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_tagged_str" get_tagged_str(d: *DecodeCtx, which: int, lk: int, ln: long,
+                                                    lp: *u8, ll: usize, req: u8, p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_bignum" get_bignum(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+                                            p: **u8, n: *usize, negative: *int) -> int
+extern "sysl_qcbor_get_mime" get_mime(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8,
+                                        p: **u8, n: *usize, binary: *int) -> int
+extern "sysl_qcbor_get_decimal_fraction" get_decimal_fraction(d: *DecodeCtx, lk: int, ln: long,
+                                                                lp: *u8, ll: usize, req: u8, mantissa: *long,
+                                                                exponent: *long) -> int
+extern "sysl_qcbor_get_big_float" get_big_float(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                                  req: u8, mantissa: *long,
+                                                  exponent: *long) -> int
+extern "sysl_qcbor_get_decimal_fraction_big" get_decimal_fraction_big(
+    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
+    p: **u8, n: *usize, negative: *int, exponent: *long) -> int
+extern "sysl_qcbor_get_big_float_big" get_big_float_big(
+    d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize, req: u8, scratch: *u8, scratch_len: usize,
+    p: **u8, n: *usize, negative: *int, exponent: *long) -> int
+extern "sysl_qcbor_enter_map" enter_map(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
+extern "sysl_qcbor_enter_array" enter_array(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize) -> int
+extern "sysl_qcbor_exit_map" exit_map(d: *DecodeCtx) -> int
+extern "sysl_qcbor_exit_array" exit_array(d: *DecodeCtx) -> int
+extern "sysl_qcbor_get_map_bytes" get_map_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                                  p: **u8, n: *usize) -> int
+extern "sysl_qcbor_get_array_bytes" get_array_bytes(d: *DecodeCtx, lk: int, ln: long, lp: *u8, ll: usize,
+                                                      p: **u8, n: *usize) -> int
+extern "sysl_qcbor_enter_bstr_wrapped" enter_bstr_wrapped(d: *DecodeCtx, lk: int, ln: long,
+                                                            lp: *u8, ll: usize, req: u8, p: **u8,
+                                                            n: *usize) -> int
+extern "sysl_qcbor_exit_bstr_wrapped" exit_bstr_wrapped(d: *DecodeCtx) -> int
+extern "sysl_qcbor_get_item_in_map" get_item_in_map(d: *DecodeCtx, lk: int, ln: long,
+                                                      lp: *u8, ll: usize) -> int
