@@ -9,12 +9,22 @@
 // against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.2.0" }
+//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.3.0" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is a
-// tag `v0.2.0` on this repository. `build-lib` and `--lib` still work and are what the tests here
+// tag `v0.3.0` on this repository. `build-lib` and `--lib` still work and are what the tests here
 // use, but they are no longer the only way in.
+
+// The C is compiled from `sh/sysl/qcbor/c/`, beside the sub-module that declares it. A package's C
+// may sit beside a *sub*-module as readily as beside the top one, which is what lets everything that
+// is C -- the shim, QCBOR's five translation units, their headers, and the `extern`s over them --
+// live in one directory rather than in two places that have to be kept in mind together.
+//
+// **There is no `requires { headers }` key either.** A `c const` block asks the C compiler for a
+// value, so its expressions are compiled against a header -- but `shim.h` is carried here, so it
+// resolves beside the file that names it and no consumer passes an include path. That key is for a
+// package measuring a header the *machine* supplies, which cairo does and this one does not.
 
 // `name` is the package; the module a program imports is `sh.sysl.qcbor`, and the two are
 // deliberately different. The module carries the `sh.sysl.` prefix so that no package claims a
@@ -23,7 +33,7 @@
 
 package {
   name    = "qcbor"
-  version = "0.2.0"
+  version = "0.3.0"
 }
 
 // **There is deliberately no `requires` block.** QCBOR allocates nothing -- `malloc`, `calloc` and

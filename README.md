@@ -21,18 +21,38 @@ sh/sysl/qcbor/
     encode.sysl         `Encoder`
     decode.sysl         `Decoder` — traversal and the bounded getters
     item.sysl           `Item`, and the values read out of one
-    shim.c              the C that only C can reach
-    shim.h              the one declaration a `c const` block has to be able to name
-    tests.sysl          89 tests, mostly against RFC 8949's own table
-    qcbor_encode.c      vendored from laurencelundblade/QCBOR v1.6.1
-    qcbor_decode.c
-    UsefulBuf.c  ieee754.c  qcbor_err_to_str.c  and their headers
+    tests.sysl          94 tests, mostly against RFC 8949's own table
+    c/
+        c.sysl          every declaration that crosses into C, and nothing else
+        shim.c          the C that only C can reach
+        shim.h          what a `c const` block has to be able to name
+        qcbor_encode.c  vendored from laurencelundblade/QCBOR v1.6.1
+        qcbor_decode.c
+        UsefulBuf.c  ieee754.c  qcbor_err_to_str.c  and their headers
 package.hocon           who this package is, and what it needs of the machine
 ```
 
-**The four `.sysl` files are one module**, all declaring `module sh.sysl.qcbor`, so the split is
-invisible to anything importing it. What decided the boundaries is that a struct's methods live in
-its declaration: `Encoder`, `Decoder` and `Item` are each too large to share a file with another.
+**The four `.sysl` files at the top are one module**, all declaring `module sh.sysl.qcbor`, so the
+split is invisible to anything importing it. What decided the boundaries is that a struct's methods
+live in its declaration: `Encoder`, `Decoder` and `Item` are each too large to share a file with
+another.
+
+**Everything that is C is in `c/`** — the sub-module `sh.sysl.qcbor.c`, and the C itself. That
+directory holds the `@link`, the `@include`, the three opaque contexts, every `c const` block and all
+155 `extern` declarations, beside `shim.c` and QCBOR's own translation units. A call reading
+`c.add_int64(h, 1)` says it is crossing into C, and nothing in the other four files reads as though
+it were sysl when it is not.
+
+The two layers have different jobs. `c` has to be **faithful** — a signature that disagrees with the
+header links perfectly and corrupts the call at run time, and nothing checks one against the other.
+The rest has to be **pleasant**, which is a different question and would otherwise be answered in the
+same breath. A program may import `c` and use it; the split is there to make the boundary legible,
+not to forbid crossing it.
+
+**Nothing here has an `impl Drop`, and that is the point rather than an omission.** The other C
+bindings in this org wrap a handle the library allocated and free it when the last reference goes.
+QCBOR allocates nothing: a context is storage the caller supplied and a decoded string is a view into
+the caller's input, so there is no ownership for the language to track and no `destroy` to hide.
 
 The module is **`sh.sysl.qcbor`**, and the three directories are that name: a dotted module name
 mirrors its path from the library root. The prefix is the reverse-DNS of `sysl.sh`, so that a package
@@ -44,12 +64,12 @@ Name it in your project's `package.hocon` and `sysl build` fetches it:
 
 ```hocon
 dependencies {
-  qcbor { git = "github.com/sysl-lang/qcbor", version = "0.2.0" }
+  qcbor { git = "github.com/sysl-lang/qcbor", version = "0.3.0" }
 }
 ```
 
 The coordinate is an identity rather than a URL, so it carries no `https://`, and `version` is the
-tag `v0.2.0` here. Resolution clones it, selects versions by MVS, and records what arrived in
+tag `v0.3.0` here. Resolution clones it, selects versions by MVS, and records what arrived in
 `sysl.sum`.
 
 Or build it into an artifact and compile against that, which needs no fetching and is what this
@@ -117,6 +137,22 @@ encoder_with_storage(storage[0..<encode_words], out[0..<32]) match
 divided by eight, asked of the C compiler at build time in a `c const` block — so they are the
 target's answer and not the machine the binding was written on, and unlike a shim function reporting
 one they are constants, which is what an array's length has to be.
+
+## QCBOR's own numbering, asked of the C compiler
+
+`ErrorKind`, `ItemKind`, `DecodeMode` and `TagRequirement` name QCBOR's constants directly. Until
+0.3.0 each of them crossed as a dense ordinal that had to run down the enum's declaration order,
+with a hand-written list in `shim.c` saying which QCBOR constant a position meant — two
+transcriptions in two languages, and nothing comparing them. The binding's own comment admitted it:
+*"the declaration order above IS the agreement with `shim.c`"*.
+
+They are `match`es against `sh.sysl.qcbor.c` now, so a QCBOR name that does not exist is a compile
+error and a variant with no arm is one too, and about 250 lines of C went with the change. What the
+compiler still cannot check is that the right variant is on the right side of an arrow, so nineteen
+item kinds are read back off real CBOR in the tests and the six tag-requirement numbers are pinned.
+
+All four also print as words — `f"${item.kind()}"` says `decimal fraction with a negative bignum
+mantissa` rather than `14`.
 
 ## Decoding, two ways
 
@@ -205,7 +241,8 @@ decides what to do about a field its schema does not know.
 ## Upstream
 
 Vendored from [laurencelundblade/QCBOR](https://github.com/laurencelundblade/QCBOR) at tag `v1.6.1`.
-It is BSD-3-Clause; see `LICENSE`, which carries the copyright notices redistribution requires.
+It is BSD-3-Clause; see `LICENSE`, which carries the copyright notices redistribution requires and
+says which files are the binding's own rather than QCBOR's.
 
 **One modification, and it is mechanical.** sysl compiles a tree's C with no include path of its own,
 so a quoted `#include` resolves relative to the file that wrote it and to nothing else — while

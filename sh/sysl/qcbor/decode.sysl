@@ -334,9 +334,12 @@ struct Decoder
     // could not. `ctx` is passed through untouched and is where an allocator keeps its state, since
     // a C function has no environment of its own.
     //
-    // The shape is out-parameters rather than a returned block because QCBOR's own callback hands
-    // back a `UsefulBuf` **by value**, and a two-word C aggregate is exactly what `15 §7` says not to
-    // transcribe into sysl. `shim.c` adapts between the two.
+    // The shape is out-parameters rather than a returned block, and `shim.c` adapts between the two.
+    // **That is a choice rather than a limit**: a struct passed or returned by value crosses the C
+    // ABI correctly, including a two-word `{*u8, usize}` -- which is what a `UsefulBuf` is -- so a
+    // sysl callback answering one directly is expressible. What the split buys is that "could not
+    // allocate" is a return value here rather than a NULL hidden inside the answer, which is the
+    // shape a caller writing the failing branch would rather read.
     set_allocator(self, allocate: *extern(*u8, *u8, usize, **u8, *usize) -> int, ctx: *u8,
                   all_strings: bool) =
         c.decode_set_allocator(self.handle, allocate, ctx, flag(all_strings))

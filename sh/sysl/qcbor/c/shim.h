@@ -25,15 +25,14 @@
 
 /* A caller's own string allocator, in the shape sysl can express.
  *
- * QCBOR's `QCBORStringAllocate` returns a `UsefulBuf` **by value**, and sysl has
- * no spelling for that -- a `*extern` can be called with C's convention, but the
- * type it returns has to be one sysl can name, and a two-word aggregate whose
- * layout is C's is exactly what `15 § 7` says not to transcribe.
+ * QCBOR's `QCBORStringAllocate` returns a `UsefulBuf` by value. sysl can express
+ * that -- a two-word aggregate crosses the C ABI correctly in both directions --
+ * so this is a shape the binding chose rather than one it was forced into: the
+ * sysl side answers through out-parameters, and non-zero means the allocation
+ * failed. A failure is then a return value rather than a NULL hidden inside the
+ * answer, which is the branch a caller has to write either way.
  *
- * So the sysl side's allocator answers through out-parameters instead, and
- * `allocator_thunk` in `shim.c` is the C function QCBOR actually gets. Non-zero
- * from the sysl side means the allocation failed, which becomes the NULL buffer
- * QCBOR reads as failure.
+ * `allocator_thunk` in `shim.c` is the C function QCBOR actually gets.
  */
 typedef int (*SyslAllocate)(void *ctx, uint8_t *old_mem, size_t new_size,
                             uint8_t **out_ptr, size_t *out_len);
