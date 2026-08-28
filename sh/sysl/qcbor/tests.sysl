@@ -225,18 +225,18 @@ encodes_the_byte_strings() =
 
 @test
 encodes_the_arrays() =
-    var empty = (e: Encoder) ->
+    val empty = (e: Encoder) ->
         e.open_array()
         e.close_array()
 
-    var three = (e: Encoder) ->
+    val three = (e: Encoder) ->
         e.open_array()
         e.add_int(1)
         e.add_int(2)
         e.add_int(3)
         e.close_array()
 
-    var nested = (e: Encoder) ->
+    val nested = (e: Encoder) ->
         e.open_array()
         e.add_int(1)
         e.open_array()
@@ -255,12 +255,12 @@ encodes_the_arrays() =
 
 @test
 encodes_the_maps() =
-    var empty = (e: Encoder) ->
+    val empty = (e: Encoder) ->
         e.open_map()
         e.close_map()
 
     // Integer labels, which is what a compact protocol uses in place of names.
-    var numbered = (e: Encoder) ->
+    val numbered = (e: Encoder) ->
         e.open_map()
         e.label_at(1)
         e.add_int(2)
@@ -268,7 +268,7 @@ encodes_the_maps() =
         e.add_int(4)
         e.close_map()
 
-    var with_array = (e: Encoder) ->
+    val with_array = (e: Encoder) ->
         e.open_map()
         e.label("a")
         e.add_int(1)
@@ -279,7 +279,7 @@ encodes_the_maps() =
         e.close_array()
         e.close_map()
 
-    var map_in_array = (e: Encoder) ->
+    val map_in_array = (e: Encoder) ->
         e.open_array()
         e.add_text("a")
         e.open_map()
@@ -297,11 +297,11 @@ encodes_the_maps() =
 // underscore in the diagnostic notation.
 @test
 encodes_the_indefinite_length_forms() =
-    var empty = (e: Encoder) ->
+    val empty = (e: Encoder) ->
         e.open_array_indefinite()
         e.close_array_indefinite()
 
-    var mixed = (e: Encoder) ->
+    val mixed = (e: Encoder) ->
         e.open_array_indefinite()
         e.add_int(1)
         e.open_array()
@@ -314,7 +314,7 @@ encodes_the_indefinite_length_forms() =
         e.close_array_indefinite()
         e.close_array_indefinite()
 
-    var map = (e: Encoder) ->
+    val map = (e: Encoder) ->
         e.open_map_indefinite()
         e.label("a")
         e.add_int(1)
@@ -335,11 +335,11 @@ encodes_the_indefinite_length_forms() =
 
 @test
 encodes_the_tagged_types_from_the_specification() =
-    var b16 = (e: Encoder) ->
+    val b16 = (e: Encoder) ->
         e.add_tag(tag_enc_as_b16)
         e.add_bytes(unhex("01020304"))
 
-    var nested_cbor = (e: Encoder) ->
+    val nested_cbor = (e: Encoder) ->
         e.add_tag(tag_cbor)
         e.add_bytes(unhex("6449455446"))
 
@@ -586,7 +586,7 @@ bstr_wrap_reports_where_the_wrapped_bytes_are() =
 // Already-encoded CBOR spliced in as-is, which is what a cache of pre-encoded fragments needs.
 @test
 encoded_bytes_are_spliced_in_unchanged() =
-    var build = (e: Encoder) ->
+    val build = (e: Encoder) ->
         e.open_array()
         e.add_int(1)
         e.add_encoded(unhex("02"))
