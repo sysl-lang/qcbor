@@ -211,7 +211,7 @@ const items_capacity: usize = ITEM_LIST_CAPACITY
 
 // A list of labels to fetch from `of`'s entered map in one pass.
 item_list(of: Decoder) -> ItemList
-    var storage: []u64 = [0; c.ITEM_LIST_WORDS]
+    val storage: []u64 = [0; c.ITEM_LIST_WORDS]
 
     // Cannot fail: the storage was just sized by asking C what it needs.
     ItemList(storage, c.items_init(&storage[0], storage.len), of)
@@ -408,7 +408,7 @@ struct Item
     tags(self) -> []u64
         val limit = usize(max_tags_per_item)
 
-        var found: []u64 = [0; limit]
+        val found: []u64 = [0; limit]
         var n: usize = 0
 
         while n < limit
@@ -447,7 +447,7 @@ end Item
 // alive. **`input` is not copied**, and every string the decode reports is a view into it, so it must
 // outlive the values read out of it.
 decoder(input: []const u8, mode: DecodeMode) -> Decoder
-    var storage: []u64 = [0; decoder_words]
+    val storage: []u64 = [0; decoder_words]
 
     // Cannot fail: the storage was just sized by asking C what it needs.
     decoder_with_storage(storage, input, mode).unwrap()

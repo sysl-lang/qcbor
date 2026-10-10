@@ -341,7 +341,7 @@ end Span
 // `finish_get_size` reports what the encoding would have taken, which is how a caller sizes a buffer
 // before making one.
 encoder(out: []u8) -> Encoder
-    var storage: []u64 = [0; encode_words]
+    val storage: []u64 = [0; encode_words]
 
     // Cannot fail: the storage was just sized by asking C what it needs.
     encoder_with_storage(storage, out).unwrap()

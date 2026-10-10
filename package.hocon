@@ -9,11 +9,11 @@
 // against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.0" }
+//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.1" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is a
-// tag `v0.4.0` on this repository. `build-lib` and `--lib` still work and are what the tests here
+// tag `v0.4.1` on this repository. `build-lib` and `--lib` still work and are what the tests here
 // use, but they are no longer the only way in.
 
 // The C is compiled from `sh/sysl/qcbor/c/`, beside the sub-module that declares it. A package's C
@@ -33,16 +33,12 @@
 
 package {
   name    = "qcbor"
-  version = "0.4.0"
+  version = "0.4.1"
 
-  // **The floor is the `val` closure**, which is what the thirteen bindings in `tests.sysl` are:
-  // a closure that only reads its captures is called on a `val`, and `Fn::call` charged every
-  // closure a `*self` until 0.0.87 -- card `0317`. So no earlier compiler can build this tree.
-  //
-  // It is the first floor this package has ever stated. Nothing before it needed one: every
-  // construct here has been in sysl since well before the binding was written, so an older compiler
-  // was refused by nothing and had no reason to be.
-  sysl = "0.0.87"
+  // **The floor is the `val`-bound slice**: the working storage in `item.sysl`, `encode.sysl` and
+  // `tests.sysl` is a `val x: []T`, written through, which an earlier compiler refuses. The thirteen
+  // `val` closures in `tests.sysl` need 0.0.87 besides, so no earlier compiler can build this tree.
+  sysl = "0.1.0-alpha.8"
 }
 
 // **There is deliberately no `requires` block.** QCBOR allocates nothing -- `malloc`, `calloc` and

@@ -20,7 +20,7 @@ private unhex(s: string) -> []u8
     require s.bytes.len % 2 == 0, "a hexadecimal byte string has an even number of digits"
 
     val b = s.bytes
-    var out: []u8 = [0; b.len / 2]
+    val out: []u8 = [0; b.len / 2]
 
     for i in 0..<out.len do out[i] = nib(b[i * 2]) * 16 + nib(b[i * 2 + 1])
 
@@ -51,7 +51,7 @@ end done
 // indented block does not reach inside an argument list (`00 §9`), so a case needing several calls
 // binds its closure to a name first, and the structural tests below do exactly that.
 private check(expected: string, note: string, build: Encoder -> unit)
-    var out: []u8 = [0; 128]
+    val out: []u8 = [0; 128]
     var e = encoder(out)
 
     build(e)
@@ -75,7 +75,7 @@ end make_one
 
 @test
 an_encoder_outlives_the_function_that_made_it() =
-    var out: []u8 = [0; 32]
+    val out: []u8 = [0; 32]
     var e = make_one(out)
 
     e.add_int(1)
@@ -134,8 +134,8 @@ a_decoder_can_be_given_its_own_storage() =
 // Storage shorter than the context needs is refused rather than written past.
 @test
 storage_that_is_too_small_is_refused() =
-    var storage: []u64 = [0; 1]
-    var out: []u8 = [0; 32]
+    val storage: []u64 = [0; 1]
+    val out: []u8 = [0; 32]
 
     encoder_with_storage(storage, out) match
         Ok(_) -> assert(false, "one word is not enough for a context and should have been refused")
@@ -418,7 +418,7 @@ the_registered_tag_numbers_are_what_the_registry_says() =
 // `add` methods report anything.
 @test
 a_buffer_too_small_is_reported_once_at_the_end() =
-    var out: []u8 = [0; 2]
+    val out: []u8 = [0; 2]
     var e = encoder(out)
 
     e.add_text("more than two bytes")
@@ -432,7 +432,7 @@ a_buffer_too_small_is_reported_once_at_the_end() =
 // An unclosed map is caught at `finish` rather than left to produce truncated CBOR.
 @test
 an_unclosed_map_is_caught() =
-    var out: []u8 = [0; 32]
+    val out: []u8 = [0; 32]
     var e = encoder(out)
 
     e.open_map()
@@ -454,7 +454,7 @@ an_unclosed_map_is_caught() =
 // noticed here rather than by whoever is reading the output at the far end.
 @test
 a_dangling_label_is_not_caught() =
-    var out: []u8 = [0; 32]
+    val out: []u8 = [0; 32]
     var e = encoder(out)
 
     e.open_map()
@@ -472,7 +472,7 @@ a_dangling_label_is_not_caught() =
 // buffer before making one. The count must agree with what the same calls actually write.
 @test
 an_encoder_with_no_buffer_counts_what_it_would_write() =
-    var nothing: []u8 = []
+    val nothing: []u8 = []
     var counter = encoder(nothing)
 
     assert(counter.counting_only(), "an empty buffer is size-calculation mode")
@@ -485,7 +485,7 @@ an_encoder_with_no_buffer_counts_what_it_would_write() =
     counter.finish_get_size() match
         Err(why) -> assert(false, why.message())
         Ok(size) ->
-            var out: []u8 = [0; 64]
+            val out: []u8 = [0; 64]
             var e = encoder(out)
 
             e.open_array()
@@ -501,7 +501,7 @@ an_encoder_with_no_buffer_counts_what_it_would_write() =
 // safe. A CBOR sequence -- several top-level items in a row -- is what this is for.
 @test
 substring_reports_what_was_written_since_a_position() =
-    var out: []u8 = [0; 64]
+    val out: []u8 = [0; 64]
     var e = encoder(out)
 
     e.add_int(7)
@@ -527,7 +527,7 @@ substring_reports_what_was_written_since_a_position() =
 // around rather than left to be discovered.
 @test
 a_span_does_not_survive_the_close_of_an_enclosing_array() =
-    var out: []u8 = [0; 64]
+    val out: []u8 = [0; 64]
     var e = encoder(out)
 
     e.open_array()
@@ -551,7 +551,7 @@ a_span_does_not_survive_the_close_of_an_enclosing_array() =
 // A byte string whose content is written straight into the output buffer, with no second copy.
 @test
 open_bytes_writes_into_the_output_buffer() =
-    var out: []u8 = [0; 64]
+    val out: []u8 = [0; 64]
     var e = encoder(out)
 
     e.open_bytes() match
@@ -568,7 +568,7 @@ open_bytes_writes_into_the_output_buffer() =
 // signed. The span is what a caller would hash.
 @test
 bstr_wrap_reports_where_the_wrapped_bytes_are() =
-    var out: []u8 = [0; 64]
+    val out: []u8 = [0; 64]
     var e = encoder(out)
 
     e.bstr_wrap()
@@ -599,7 +599,7 @@ encoded_bytes_are_spliced_in_unchanged() =
 // through it.
 @test
 a_head_can_be_encoded_on_its_own() =
-    var out: []u8 = [0; 16]
+    val out: []u8 = [0; 16]
 
     assert(head_max >= 9, "a head is at most nine or ten bytes")
 
@@ -1165,7 +1165,7 @@ reads_a_big_float() =
 reads_a_decimal_fraction_with_a_wide_mantissa() =
     // 4([-2, 2(h'010000000000000000')])
     var d = decoder(unhex("c48221c249010000000000000000"), Normal)
-    var scratch: []u8 = [0; 32]
+    val scratch: []u8 = [0; 32]
 
     d.get_decimal_fraction_big(scratch, Required) match
         Err(e) -> assert(false, e.message())
@@ -1467,7 +1467,7 @@ an_indefinite_string_needs_a_pool() =
 @test
 a_pool_joins_the_chunks_of_an_indefinite_string() =
     var d = decoder(unhex("7f657374726561646d696e67ff"), Normal)
-    var pool: []u8 = [0; 256]
+    val pool: []u8 = [0; 256]
 
     assert(pool.len > mem_pool_overhead, "the pool must exceed QCBOR's own bookkeeping")
 
@@ -1517,7 +1517,7 @@ running_out_of_items_is_its_own_error() =
 // ordinal and one of them starts naming the wrong thing.
 @test
 the_error_kinds_line_up_with_the_c_side() =
-    var small: []u8 = [0; 1]
+    val small: []u8 = [0; 1]
     var e = encoder(small)
 
     e.add_text("too long for one byte")
@@ -1526,7 +1526,7 @@ the_error_kinds_line_up_with_the_c_side() =
         Ok(_) -> assert(false, "it does not fit")
         Err(err) -> assert(err.kind() == BufferTooSmall, "BufferTooSmall")
 
-    var open_map_out: []u8 = [0; 32]
+    val open_map_out: []u8 = [0; 32]
     var open_map = encoder(open_map_out)
 
     open_map.open_map()
@@ -1640,7 +1640,7 @@ end bump
 a_caller_can_supply_its_own_allocator() =
     // (_ "strea", "ming") -- RFC 8949 appendix A, which needs somewhere to join the two chunks.
     var d = decoder(unhex("7f657374726561646d696e67ff"), Normal)
-    var block: []u8 = [0; 256]
+    val block: []u8 = [0; 256]
     var arena = Arena(block, 0, 0)
 
     d.set_allocator(&bump, ptr_cast(&arena), false)
@@ -1661,7 +1661,7 @@ a_caller_can_supply_its_own_allocator() =
 
 @test
 the_readme_encoding_example_works() =
-    var out: []u8 = [0; 256]
+    val out: []u8 = [0; 256]
     var e = encoder(out)
 
     e.open_map()
