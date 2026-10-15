@@ -4,6 +4,8 @@ CBOR — [RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html) — for
 [sysl](https://github.com/sysl-lang/sysl), bound to
 [QCBOR](https://github.com/laurencelundblade/QCBOR) 1.6.1.
 
+*An independent sysl package for QCBOR. It is not affiliated with or endorsed by QCBOR's authors or trademark holders.*
+
 **Nothing has to be installed to use this.** QCBOR is about 11,000 lines of C and this package
 carries them: sysl compiles a library's C as part of the build, so there is no `pkg-config`, no build
 script, and nothing to apt-get. The only `@link` in the binding is `m`, the mathematics, and only the
