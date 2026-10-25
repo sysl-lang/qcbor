@@ -37,7 +37,7 @@ import sysl.text.from_cstring
 //
 // The C is compiled as part of the library (`15 §7`), so **nothing has to be installed to use this
 // package**, and the only `@link` is `m` -- the mathematics, which the decoder's numeric coercions
-// reach for and nothing else does. `package.hocon` says why that is a link directive rather than a
+// reach for and nothing else does. `sysl.hocon` says why that is a link directive rather than a
 // capability.
 //
 // **QCBOR allocates nothing, and this binding keeps that.** A context is storage the caller supplies;

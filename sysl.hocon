@@ -9,11 +9,11 @@
 // against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.2" }
+//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.3" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is a
-// tag `v0.4.2` on this repository. `build-lib` and `--lib` still work and are what the tests here
+// tag `v0.4.3` on this repository. `build-lib` and `--lib` still work and are what the tests here
 // use, but they are no longer the only way in.
 
 // The C is compiled from `sh/sysl/qcbor/c/`, beside the sub-module that declares it. A package's C
@@ -33,12 +33,11 @@
 
 package {
   name    = "qcbor"
-  version = "0.4.2"
+  version = "0.4.3"
 
-  // **The floor is the `val`-bound slice**: the working storage in `item.sysl`, `encode.sysl` and
-  // `tests.sysl` is a `val x: []T`, written through, which an earlier compiler refuses. The thirteen
-  // `val` closures in `tests.sysl` need 0.0.87 besides, so no earlier compiler can build this tree.
-  sysl = "0.1.0-alpha.8"
+  // **The floor is 0.6.0**: the `ptr_cast` import comes from `sysl.raw`, which earlier compilers do
+  // not have.
+  sysl = "0.6.0"
 }
 
 // **There is deliberately no `requires` block.** QCBOR allocates nothing -- `malloc`, `calloc` and

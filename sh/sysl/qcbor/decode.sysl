@@ -1,6 +1,7 @@
 module sh.sysl.qcbor
 
 import sh.sysl.qcbor.c
+import sysl.raw.ptr_cast
 import sysl.slices.{as_ptr, as_mut_ptr}
 
 // Decoding: `Decoder`, its traversal and its bounded getters.

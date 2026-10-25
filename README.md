@@ -31,7 +31,7 @@ sh/sysl/qcbor/
         qcbor_encode.c  vendored from laurencelundblade/QCBOR v1.6.1
         qcbor_decode.c
         UsefulBuf.c  ieee754.c  qcbor_err_to_str.c  and their headers
-package.hocon           who this package is, and what it needs of the machine
+sysl.hocon              who this package is, and what it needs of the machine
 ```
 
 **The four `.sysl` files at the top are one module**, all declaring `module sh.sysl.qcbor`, so the
@@ -62,16 +62,16 @@ claims a name nobody else will mint rather than the top-level word `qcbor`.
 
 ## Using it
 
-Name it in your project's `package.hocon` and `sysl build` fetches it:
+Name it in your project's `sysl.hocon` and `sysl build` fetches it:
 
 ```hocon
 dependencies {
-  qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.2" }
+  qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.3" }
 }
 ```
 
 The coordinate is an identity rather than a URL, so it carries no `https://`, and `version` is the
-tag `v0.4.2` here. Resolution clones it, selects versions by MVS, and records what arrived in
+tag `v0.4.3` here. Resolution clones it, selects versions by MVS, and records what arrived in
 `sysl.sum`.
 
 Or build it into an artifact and compile against that, which needs no fetching and is what this

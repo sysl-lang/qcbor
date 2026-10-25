@@ -1,6 +1,7 @@
 module sh.sysl.qcbor
 
 import sh.sysl.qcbor.c
+import sysl.raw.ptr_cast
 import sysl.text.{str_builder_with_capacity, from_utf8}
 
 // The binding's own tests, run by `sysl test .`.
@@ -617,61 +618,47 @@ a_head_can_be_encoded_on_its_own() =
 // Decoding — the same RFC 8949 vectors, read the other way
 // ==================================================================================================
 
-// **An `Option` carries no `==`, whatever it holds** (`14`, recorded there as a catalog omission
-// rather than a language gap: `impl[T: Eq] Eq for Option[T]` is writable, and the open question is
-// whether the whole generic family joins the catalog at once). So a test that wants "this item holds
-// this value" takes the option apart, and these say it once each instead of at every assertion.
+// An `Option` of a comparable type has `==`, so "this item holds this value" is one comparison; these
+// name the common ones so an assertion reads as a sentence.
 
-private is_int(item: Item, want: long) -> bool =
-    item.int_value() match
-        None -> false
-        Some(v) -> v == want
+private is_int(item: Item, want: long) -> bool = item.int_value() == Some(want)
 
-private is_uint(item: Item, want: ulong) -> bool =
-    item.uint_value() match
-        None -> false
-        Some(v) -> v == want
+private is_uint(item: Item, want: ulong) -> bool = item.uint_value() == Some(want)
 
-private is_double(item: Item, want: real) -> bool =
-    item.double_value() match
-        None -> false
-        Some(v) -> v == want
+private is_double(item: Item, want: real) -> bool = item.double_value() == Some(want)
 
-private is_bool(item: Item, want: bool) -> bool =
-    item.bool_value() match
-        None -> false
-        Some(v) -> v == want
+private is_bool(item: Item, want: bool) -> bool = item.bool_value() == Some(want)
 
-private is_simple(item: Item, want: u8) -> bool =
-    item.simple_value() match
-        None -> false
-        Some(v) -> v == want
+private is_simple(item: Item, want: u8) -> bool = item.simple_value() == Some(want)
 
+// `Utf8Error` has no `==`, so a text is taken apart: the `Result` around it cannot be compared.
 private is_text(item: Item, want: string) -> bool =
     item.text() match
-        None -> false
-        Some(r) ->
-            r match
-                Err(_) -> false
-                Ok(s) -> s == want
+        Some(Ok(s)) -> s == want
+        _ -> false
 
 private is_label(item: Item, want: string) -> bool =
     item.label() match
-        None -> false
-        Some(r) ->
-            r match
-                Err(_) -> false
-                Ok(s) -> s == want
+        Some(Ok(s)) -> s == want
+        _ -> false
 
-private is_label_int(item: Item, want: long) -> bool =
-    item.label_int() match
-        None -> false
-        Some(v) -> v == want
+private is_label_int(item: Item, want: long) -> bool = item.label_int() == Some(want)
 
-private is_count(item: Item, want: usize) -> bool =
-    item.count() match
-        None -> false
-        Some(v) -> v == want
+private is_count(item: Item, want: usize) -> bool = item.count() == Some(want)
+
+// `==` tells a held value from a different one and from none at all, which the helpers above lean on.
+@test
+an_option_of_a_decoded_value_compares_with_equals() =
+    val item = only("17")
+    assert(item.int_value() == Some(23), "the value held")
+    assert(item.int_value() != Some(24), "a different value")
+    assert(item.int_value() != None, "some, not none")
+    assert(item.count() == None, "an integer has no count")
+    assert(only("83010203").count() == Some(3), "an array of three")
+    assert(only("83010203").count() != Some(2), "not two")
+    assert(is_text(only("6161"), "a"), "a text through the helper")
+    assert(!is_text(only("6161"), "b"), "a different text")
+    assert(!is_text(item, "a"), "an integer is no text")
 
 private has_count(item: Item) -> bool =
     item.count() match
