@@ -66,12 +66,12 @@ Name it in your project's `sysl.hocon` and `sysl build` fetches it:
 
 ```hocon
 dependencies {
-  qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.3" }
+  qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.4" }
 }
 ```
 
 The coordinate is an identity rather than a URL, so it carries no `https://`, and `version` is the
-tag `v0.4.3` here. Resolution clones it, selects versions by MVS, and records what arrived in
+tag `v0.4.4` here. Resolution clones it, selects versions by MVS, and records what arrived in
 `sysl.sum`.
 
 Or build it into an artifact and compile against that, which needs no fetching and is what this

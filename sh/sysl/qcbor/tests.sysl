@@ -631,16 +631,9 @@ private is_bool(item: Item, want: bool) -> bool = item.bool_value() == Some(want
 
 private is_simple(item: Item, want: u8) -> bool = item.simple_value() == Some(want)
 
-// `Utf8Error` has no `==`, so a text is taken apart: the `Result` around it cannot be compared.
-private is_text(item: Item, want: string) -> bool =
-    item.text() match
-        Some(Ok(s)) -> s == want
-        _ -> false
+private is_text(item: Item, want: string) -> bool = item.text() == Some(Ok(want))
 
-private is_label(item: Item, want: string) -> bool =
-    item.label() match
-        Some(Ok(s)) -> s == want
-        _ -> false
+private is_label(item: Item, want: string) -> bool = item.label() == Some(Ok(want))
 
 private is_label_int(item: Item, want: long) -> bool = item.label_int() == Some(want)
 
@@ -659,6 +652,7 @@ an_option_of_a_decoded_value_compares_with_equals() =
     assert(is_text(only("6161"), "a"), "a text through the helper")
     assert(!is_text(only("6161"), "b"), "a different text")
     assert(!is_text(item, "a"), "an integer is no text")
+    assert(!is_label(item, "a"), "an integer has no text label")
 
 private has_count(item: Item) -> bool =
     item.count() match

@@ -9,11 +9,11 @@
 // against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.3" }
+//       qcbor { git = "github.com/sysl-lang/qcbor", version = "0.4.4" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is a
-// tag `v0.4.3` on this repository. `build-lib` and `--lib` still work and are what the tests here
+// tag `v0.4.4` on this repository. `build-lib` and `--lib` still work and are what the tests here
 // use, but they are no longer the only way in.
 
 // The C is compiled from `sh/sysl/qcbor/c/`, beside the sub-module that declares it. A package's C
@@ -33,7 +33,7 @@
 
 package {
   name    = "qcbor"
-  version = "0.4.3"
+  version = "0.4.4"
 
   // **The floor is 0.6.0**: the `ptr_cast` import comes from `sysl.raw`, which earlier compilers do
   // not have.
